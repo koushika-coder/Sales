@@ -12,6 +12,7 @@ public interface IAuthService
     string HashPassword(string password);
     bool VerifyPassword(string password, string hash);
     string GenerateJwtToken(User user, string jwtSecret, string jwtIssuer, string jwtAudience);
+    string GenerateJwtToken(Admin admin, string jwtSecret, string jwtIssuer, string jwtAudience);
     int? ValidateJwtToken(string token, string jwtSecret);
 }
 
@@ -41,10 +42,34 @@ public class AuthService : IAuthService
         {
             Subject = new System.Security.Claims.ClaimsIdentity(new[]
             {
-                new System.Security.Claims.Claim("userId", user.UserId.ToString()),
+                new System.Security.Claims.Claim("Id", user.Id.ToString()),
                 new System.Security.Claims.Claim("email", user.Email),
                 new System.Security.Claims.Claim("role", user.Role),
                 new System.Security.Claims.Claim("name", user.Name)
+            }),
+            Expires = DateTime.UtcNow.AddHours(24),
+            Issuer = jwtIssuer,
+            Audience = jwtAudience,
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+        };
+
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        return tokenHandler.WriteToken(token);
+    }
+
+    public string GenerateJwtToken(Admin admin, string jwtSecret, string jwtIssuer, string jwtAudience)
+    {
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.ASCII.GetBytes(jwtSecret);
+
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new System.Security.Claims.ClaimsIdentity(new[]
+            {
+                new System.Security.Claims.Claim("adminId", admin.AdminId.ToString()),
+                new System.Security.Claims.Claim("email", admin.Email),
+                new System.Security.Claims.Claim("role", admin.Role),
+                new System.Security.Claims.Claim("name", admin.Name)
             }),
             Expires = DateTime.UtcNow.AddHours(24),
             Issuer = jwtIssuer,

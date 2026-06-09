@@ -4,6 +4,10 @@ using Sales.Data;
 using Sales.Middleware;
 using Sales.Services;
 using System.Text;
+using YourApp.Services;
+using static Sales.Services.LotteryInstanceService;
+using static Sales.Services.LotteryService;
+using static YourApp.Services.SafeDropService;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,7 +37,7 @@ builder.Services.AddAuthentication("Bearer")
     });
 
 // CORS
-var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?.Split(",") ?? new[] { "*" };
+var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?.Split(",") ?? ["*"];
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSpecificOrigins", policyBuilder =>
@@ -49,7 +53,33 @@ builder.Services.AddCors(options =>
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IShopSaleService, ShopSaleService>();
+//builder.Services.AddScoped<ICashBankingService, CashBankingService>();
+builder.Services.AddScoped<IPaypointService, PaypointService>();
+// Program.cs
+builder.Services.AddScoped<IDeductionsService, DeductionsService>();
+builder.Services.AddScoped<ISuppliersService, SuppliersService>();//builder.Services.AddScoped<IInstantLotteryService, InstantLotteryService>();
+builder.Services.AddScoped<ILotteryService, LotteryService>();
+builder.Services .AddHttpContextAccessor();
+
+builder.Services.AddScoped<ILotteryInstanceService, LotteryInstanceService>();
+builder.Services.AddScoped<ISafeDropService, SafeDropService>();
+
+//builder.Services.AddScoped<IReconciliationService, ReconciliationService>();
+//builder.Services.AddScoped<IGoogleOAuthService, GoogleOAuthService>();
+// Program.cs
+builder.Services.AddScoped<IDeductionsService, DeductionsService>();
+builder.Services.AddScoped<ISuppliersService, SuppliersService>();
+builder.Services.AddScoped<ICreditCardService, CreditCardBankingService>();
+builder.Services.AddScoped<IGmailService,GmailServiceImpl>();
+builder.Services.AddScoped<ISummaryService, SummaryService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+
+// HTTP Client Factory for Google OAuth
+builder.Services.AddHttpClient();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

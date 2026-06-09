@@ -32,7 +32,6 @@ public class AuthController : ControllerBase
         var token = _authService.GenerateJwtToken(
             new Sales.Models.User 
             { 
-                UserId = user.UserId, 
                 Email = user.Email, 
                 Name = user.Name, 
                 Role = user.Role 
@@ -57,8 +56,8 @@ public class AuthController : ControllerBase
 
         var token = _authService.GenerateJwtToken(
             new Sales.Models.User 
-            { 
-                UserId = user.UserId, 
+            {
+                Id = user.UserId,
                 Email = user.Email, 
                 Name = user.Name, 
                 Role = user.Role 

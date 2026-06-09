@@ -44,15 +44,26 @@ public class JwtAuthenticationMiddleware
             }, out SecurityToken validatedToken);
 
             var jwtToken = (JwtSecurityToken)validatedToken;
-            var userId = jwtToken.Claims.First(x => x.Type == "userId").Value;
-            var userRole = jwtToken.Claims.First(x => x.Type == "role").Value;
+            
+            // Check if it's a user token or admin token
+            var userIdClaim = jwtToken.Claims.FirstOrDefault(x => x.Type == "userId");
+            var adminIdClaim = jwtToken.Claims.FirstOrDefault(x => x.Type == "adminId");
+            var roleClaim = jwtToken.Claims.FirstOrDefault(x => x.Type == "role");
 
-            context.Items["UserId"] = int.Parse(userId);
-            context.Items["UserRole"] = userRole;
+            if (userIdClaim != null)
+            {
+                context.Items["UserId"] = int.Parse(userIdClaim.Value);
+                context.Items["UserRole"] = roleClaim?.Value ?? "user";
+            }
+            else if (adminIdClaim != null)
+            {
+                context.Items["AdminId"] = int.Parse(adminIdClaim.Value);
+                context.Items["AdminRole"] = roleClaim?.Value ?? "admin";
+            }
         }
         catch
         {
-            // Invalid token, user will not be attached
+            // Invalid token, user/admin will not be attached
         }
     }
 }

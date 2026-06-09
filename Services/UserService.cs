@@ -8,10 +8,13 @@ namespace Sales.Services;
 public interface IUserService
 {
     Task<UserDto?> RegisterAsync(RegisterRequest request, IAuthService authService);
+    Task<UserDto?> CreateUserByAdminAsync(CreateUserByAdminRequest request, IAuthService authService);
     Task<(UserDto? User, string? Error)> LoginAsync(LoginRequest request, IAuthService authService);
     Task<UserDto?> GetUserByIdAsync(int userId);
     Task<UserDto?> GetCurrentUserAsync(int userId);
     Task<PaginatedResponse<UserDto>> GetAllUsersAsync(int pageNumber = 1, int pageSize = 10);
+    Task<UserDto?> UpdateUserAsync(int userId, string? name, string? department);
+    Task<bool> DeleteUserAsync(int userId);
 }
 
 public class UserService : IUserService
@@ -60,13 +63,13 @@ public class UserService : IUserService
 
     public async Task<UserDto?> GetUserByIdAsync(int userId)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId && u.IsActive);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
         return user != null ? MapToUserDto(user) : null;
     }
 
     public async Task<UserDto?> GetCurrentUserAsync(int userId)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
         return user != null ? MapToUserDto(user) : null;
     }
 
@@ -89,16 +92,69 @@ public class UserService : IUserService
         };
     }
 
+    public async Task<UserDto?> CreateUserByAdminAsync(CreateUserByAdminRequest request, IAuthService authService)
+    {
+        // Check if user already exists
+        var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        if (existingUser != null)
+            return null;
+
+        var user = new User
+        {
+            Email = request.Email,
+            PasswordHash = authService.HashPassword(request.Password),
+            Name = request.Name,
+            Role = "user",
+            IsActive = true
+        };
+
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync();
+
+        return MapToUserDto(user);
+    }
+
+    public async Task<UserDto?> UpdateUserAsync(int userId, string? name, string? department)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return null;
+
+        if (!string.IsNullOrEmpty(name))
+            user.Name = name;
+    
+        user.UpdatedAt = DateTime.UtcNow;
+        _context.Users.Update(user);
+        await _context.SaveChangesAsync();
+
+        return MapToUserDto(user);
+    }
+
+    public async Task<bool> DeleteUserAsync(int userId)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return false;
+
+        user.IsActive = false;
+        user.UpdatedAt = DateTime.UtcNow;
+        _context.Users.Update(user);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     private static UserDto MapToUserDto(User user)
     {
         return new UserDto
         {
-            UserId = user.UserId,
+            UserId = user.Id,
             Email = user.Email,
             Name = user.Name,
             Role = user.Role,
             CreatedAt = user.CreatedAt,
-            IsActive = user.IsActive
+            IsActive = user.IsActive,
+            PasswordHash=user.PasswordHash
         };
     }
 }
