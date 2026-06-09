@@ -3,7 +3,7 @@ name: Deploy DotNet project to Azure Function App
 on:
   push:
     branches:
-      - sales_complted   # triggers only when pushing to this branch
+      - sales_complted
 
 env:
   AZURE_FUNCTIONAPP_NAME: 'sales'            # your Azure Function App name
@@ -12,7 +12,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: windows-latest   # use ubuntu-latest if you prefer Linux
+    runs-on: windows-latest
     environment: dev
 
     steps:
@@ -31,9 +31,13 @@ jobs:
           dotnet build --configuration Release --output ./output
           popd
 
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_RBAC_CREDENTIALS }}
+
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
-          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
