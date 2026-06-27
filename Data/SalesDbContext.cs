@@ -36,6 +36,8 @@ public class SalesDbContext : DbContext
 
     public DbSet<GmailConfiguration> GmailConfiguration { get; set; }
     public DbSet<SummaryCommit> SummaryCommits { get; set; }
+    public DbSet<AdminReconciliation> AdminReconciliations { get; set; }
+    public DbSet<UserActiveDateOverride> UserActiveDateOverrides { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -154,6 +156,7 @@ public class SalesDbContext : DbContext
             entity.Property(e => e.InstantLotteryPayout).HasPrecision(18, 2);
             entity.Property(e => e.NewsVoucher).HasPrecision(18, 2);
             entity.Property(e => e.DDPoint).HasPrecision(18, 2);
+            entity.Property(e => e.LotteryPayout).HasPrecision(18, 2);
             entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId);
         });
         modelBuilder.Entity<Supplier>(entity =>
@@ -231,6 +234,9 @@ public class SalesDbContext : DbContext
 
             entity.Property(e => e.CreatedDate)
                 .IsRequired();
+
+            entity.Property(e => e.ForcedOpenNo)
+                .IsRequired(false);
 
             entity.HasIndex(e => e.ScratchCardNo)
                 .IsUnique();
@@ -318,6 +324,33 @@ public class SalesDbContext : DbContext
             entity.Property(e => e.CommittedAt).IsRequired();
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
             entity.HasIndex(e => new { e.UserId, e.Date }).IsUnique();
+        });
+
+        // AdminReconciliation configuration
+        modelBuilder.Entity<AdminReconciliation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Date).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.ManualCardAmount).HasPrecision(18, 2);
+            entity.Property(e => e.CardAmount).HasPrecision(18, 2);
+            entity.Property(e => e.LastSafe).HasPrecision(18, 2);
+            entity.Property(e => e.SafeDropAmount).HasPrecision(18, 2);
+            entity.Property(e => e.Cashback).HasPrecision(18, 2);
+            entity.Property(e => e.PaypointPayout).HasPrecision(18, 2);
+            entity.Property(e => e.InstantLotteryPayout).HasPrecision(18, 2);
+            entity.Property(e => e.NewsVoucher).HasPrecision(18, 2);
+            entity.Property(e => e.DDPoint).HasPrecision(18, 2);
+            entity.Property(e => e.LotteryPayout).HasPrecision(18, 2);
+            entity.Property(e => e.InstantLotteryTotalSales).HasPrecision(18, 2);
+            entity.Property(e => e.LotteryValue).HasPrecision(18, 2);
+            entity.Property(e => e.PaypointValue).HasPrecision(18, 2);
+            entity.Property(e => e.SummaryTotal).HasPrecision(18, 2);
+            entity.Property(e => e.ZReportTotal).HasPrecision(18, 2);
+            entity.Property(e => e.Difference).HasPrecision(18, 2);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            // One reconciliation per date
+            entity.HasIndex(e => e.Date).IsUnique();
         });
     }
 }

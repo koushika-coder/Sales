@@ -14,8 +14,38 @@ namespace Sales.Services
             _context = context;
         }
 
+        // Same active-date logic as SummaryService / DeductionsService.
+        private async Task<(DateTime start, DateTime end)> GetActiveDateRangeAsync(int userId)
+        {
+            var todayUtc     = DateOnly.FromDateTime(DateTime.UtcNow);
+            var yesterdayUtc = todayUtc.AddDays(-1);
+
+            // If today is already committed, move to tomorrow.
+            var todayCommitted =
+                await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == todayUtc) ||
+                await _context.AdminReconciliations.AnyAsync(r => r.Date == todayUtc && r.Status == "submitted");
+
+            DateOnly activeDate;
+            if (todayCommitted)
+            {
+                activeDate = todayUtc.AddDays(1);
+            }
+            else
+            {
+                var yesterdayCommitted =
+                    await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == yesterdayUtc) ||
+                    await _context.AdminReconciliations.AnyAsync(r => r.Date == yesterdayUtc && r.Status == "submitted");
+                activeDate = yesterdayCommitted ? todayUtc : yesterdayUtc;
+            }
+
+            var start = activeDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            return (start, start.AddDays(1));
+        }
+
         public async Task<List<LotteryInventoryResponse>> GetTodayInventory(int userId)
         {
+            var (activeStart, activeEnd) = await GetActiveDateRangeAsync(userId);
+
             var lotteries = await _context.LotteryMaster
                 .Where(x => x.IsActive)
                 .ToListAsync();
@@ -24,27 +54,55 @@ namespace Sales.Services
 
             foreach (var lottery in lotteries)
             {
-                var lastRecord = await _context.LotteryInventory
-                    .Where(x =>
-                        x.UserId == userId &&
-                        x.LotteryId == lottery.Id)
-                    .OrderByDescending(x => x.InventoryDate)
+                // Check if the user already saved data for the active date
+                var todayRecord = await _context.LotteryInventory
+                    .Where(x => x.LotteryId == lottery.Id
+                             && x.UserId == userId
+                             && x.InventoryDate >= activeStart
+                             && x.InventoryDate < activeEnd)
                     .FirstOrDefaultAsync();
 
-                result.Add(new LotteryInventoryResponse
+                if (todayRecord != null)
                 {
-                    LotteryId = lottery.Id,
-                    ScratchCardNo = lottery.ScratchCardNo,
-                    Price = lottery.Price,
+                    // Return the saved values so the UI shows what was entered
+                    result.Add(new LotteryInventoryResponse
+                    {
+                        Id            = todayRecord.Id,
+                        LotteryId     = lottery.Id,
+                        ScratchCardNo = lottery.ScratchCardNo,
+                        Price         = lottery.Price,
+                        OpenNo        = todayRecord.OpenNo,
+                        CloseNo       = todayRecord.CloseNo,
+                        TotalSold     = todayRecord.TotalSold,
+                        Sales         = todayRecord.Sales,
+                    });
+                }
+                else
+                {
+                    // No record yet — derive OpenNo from the previous committed day's CloseNo
+                    var lastRecord = await _context.LotteryInventory
+                        .Where(x => x.LotteryId == lottery.Id
+                                 && x.UserId == userId
+                                 && x.InventoryDate < activeStart)
+                        .OrderByDescending(x => x.InventoryDate)
+                        .FirstOrDefaultAsync();
 
-                    OpenNo = lastRecord == null
-                        ? 1
-                        : lastRecord.CloseNo,
+                    // Admin-forced open value takes priority over last CloseNo
+                    int openNo = lottery.ForcedOpenNo
+                        ?? (lastRecord == null ? 1 : lastRecord.CloseNo);
 
-                    CloseNo = 0,
-                    TotalSold = 0,
-                    Sales = 0
-                });
+                    result.Add(new LotteryInventoryResponse
+                    {
+                        Id            = 0,
+                        LotteryId     = lottery.Id,
+                        ScratchCardNo = lottery.ScratchCardNo,
+                        Price         = lottery.Price,
+                        OpenNo        = openNo,
+                        CloseNo       = 0,
+                        TotalSold     = 0,
+                        Sales         = 0,
+                    });
+                }
             }
 
             return result;
@@ -52,25 +110,36 @@ namespace Sales.Services
 
         public async Task<List<LotteryInventoryReportResponse>> GetInventoryReport(int userId)
         {
+            var (activeStart, activeEnd) = await GetActiveDateRangeAsync(userId);
+            var activeDate = DateOnly.FromDateTime(activeStart);
+
+            // If the active date is already committed, return nothing.
+            var committed =
+                await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == activeDate) ||
+                await _context.AdminReconciliations.AnyAsync(r => r.Date == activeDate && r.Status == "submitted");
+
+            if (committed)
+                return [];
+
             return await (
                 from inventory in _context.LotteryInventory
                 join lottery in _context.LotteryMaster
                     on inventory.LotteryId equals lottery.Id
                 where inventory.UserId == userId
-                orderby inventory.InventoryDate descending
+                   && inventory.InventoryDate >= activeStart
+                   && inventory.InventoryDate < activeEnd
+                orderby lottery.ScratchCardNo
                 select new LotteryInventoryReportResponse
                 {
-                    Id = inventory.Id,
+                    Id            = inventory.Id,
                     ScratchCardNo = lottery.ScratchCardNo,
-                    Price = lottery.Price,
-
-                    OpenNo = inventory.OpenNo,
-                    CloseNo = inventory.CloseNo,
-
-                    TotalSold = inventory.TotalSold,
-                    Sales = inventory.Sales,
-
-                    InventoryDate = inventory.InventoryDate
+                    Price         = lottery.Price,
+                    OpenNo        = inventory.OpenNo,
+                    CloseNo       = inventory.CloseNo,
+                    TotalSold     = inventory.TotalSold,
+                    Sales         = inventory.Sales,
+                    InventoryDate = inventory.InventoryDate,
+                    IsCommitted   = false,
                 }
             ).ToListAsync();
         }
@@ -87,53 +156,52 @@ namespace Sales.Services
             if (lottery == null)
                 throw new Exception("Lottery not found.");
 
-            var totalSold =
-                request.CloseNo - request.OpenNo;
+            // Use server-side active date so it always matches what GetTodayInventory returns
+            var (activeStart, activeEnd) = await GetActiveDateRangeAsync(userId);
 
-            var sales =
-                totalSold * lottery.Price;
+            var totalSold = request.CloseNo - request.OpenNo;
+            var sales     = totalSold * lottery.Price;
 
             var existingRecord = await _context.LotteryInventory
                 .FirstOrDefaultAsync(x =>
-                    x.UserId == userId &&
                     x.LotteryId == request.LotteryId &&
-                    x.InventoryDate.Date ==
-                    request.InventoryDate.Date);
+                    x.UserId == userId &&
+                    x.InventoryDate >= activeStart &&
+                    x.InventoryDate < activeEnd);
 
             if (existingRecord != null)
             {
-                existingRecord.OpenNo = request.OpenNo;
+                existingRecord.OpenNo  = request.OpenNo;
                 existingRecord.CloseNo = request.CloseNo;
                 existingRecord.TotalSold = totalSold;
                 existingRecord.Sales = sales;
 
                 existingRecord.UpdatedByUserId = userId;
-                existingRecord.UpdatedDate = DateTime.Now;
+                existingRecord.UpdatedDate = DateTime.UtcNow;
             }
             else
             {
-                var inventory = new LotteryInventory
+                _context.LotteryInventory.Add(new LotteryInventory
                 {
-                    UserId = userId,
+                    UserId        = userId,
+                    LotteryId     = request.LotteryId,
+                    InventoryDate = activeStart,
 
-                    LotteryId = request.LotteryId,
-                    InventoryDate = request.InventoryDate.Date,
-
-                    OpenNo = request.OpenNo,
-                    CloseNo = request.CloseNo,
-
+                    OpenNo    = request.OpenNo,
+                    CloseNo   = request.CloseNo,
                     TotalSold = totalSold,
-                    Sales = sales,
+                    Sales     = sales,
 
                     CreatedByUserId = userId,
-                    CreatedDate = DateTime.Now,
-
+                    CreatedDate     = DateTime.UtcNow,
                     UpdatedByUserId = userId,
-                    UpdatedDate = DateTime.Now
-                };
-
-                _context.LotteryInventory.Add(inventory);
+                    UpdatedDate     = DateTime.UtcNow,
+                });
             }
+
+            // Clear admin-forced open value once staff has saved for the day
+            if (lottery.ForcedOpenNo.HasValue)
+                lottery.ForcedOpenNo = null;
 
             await _context.SaveChangesAsync();
         }
@@ -146,8 +214,7 @@ namespace Sales.Services
             {
                 var inventory = await _context.LotteryInventory
                     .FirstOrDefaultAsync(x =>
-                        x.Id == request.Id &&
-                        x.UserId == userId);
+                        x.Id == request.Id);
 
                 if (inventory == null)
                     throw new Exception("Inventory record not found.");
@@ -181,7 +248,66 @@ namespace Sales.Services
             {
                 Console.WriteLine(ex.Message);
             }
-        
+
+        }
+
+        // ── Admin methods ─────────────────────────────────────────────────────
+
+        public async Task<List<ScratchCardAdminResponse>> GetAllScratchCardsAsync()
+        {
+            var cards = await _context.LotteryMaster
+                .Select(x => new ScratchCardAdminResponse
+                {
+                    Id = x.Id,
+                    ScratchCardNo = x.ScratchCardNo,
+                    Price = x.Price,
+                    IsActive = x.IsActive,
+                    ForcedOpenNo = x.ForcedOpenNo,
+                    CreatedDate = x.CreatedDate,
+                })
+                .ToListAsync();
+
+            return cards
+                .OrderBy(x => int.TryParse(x.ScratchCardNo, out var n) ? n : int.MaxValue)
+                .ThenBy(x => x.ScratchCardNo)
+                .ToList();
+        }
+
+        public async Task SetOpenValueAsync(int lotteryId, int openValue)
+        {
+            var lottery = await _context.LotteryMaster.FindAsync(lotteryId)
+                ?? throw new KeyNotFoundException("Scratch card not found.");
+
+            lottery.ForcedOpenNo = openValue;
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task AddScratchCardAsync(AddScratchCardRequest request)
+        {
+            var exists = await _context.LotteryMaster
+                .AnyAsync(x => x.ScratchCardNo == request.ScratchCardNo);
+
+            if (exists)
+                throw new InvalidOperationException("A scratch card with this number already exists.");
+
+            _context.LotteryMaster.Add(new LotteryMaster
+            {
+                ScratchCardNo = request.ScratchCardNo.Trim(),
+                Price = request.Price,
+                IsActive = true,
+                CreatedDate = DateTime.Now,
+            });
+
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task ToggleScratchCardAsync(int id)
+        {
+            var lottery = await _context.LotteryMaster.FindAsync(id)
+                ?? throw new KeyNotFoundException("Scratch card not found.");
+
+            lottery.IsActive = !lottery.IsActive;
+            await _context.SaveChangesAsync();
         }
     }
 
@@ -200,5 +326,11 @@ namespace Sales.Services
         Task UpdateInventory(
             int userId,
             UpdateLotteryInventoryRequest request);
+
+        // Admin
+        Task<List<ScratchCardAdminResponse>> GetAllScratchCardsAsync();
+        Task SetOpenValueAsync(int lotteryId, int openValue);
+        Task AddScratchCardAsync(AddScratchCardRequest request);
+        Task ToggleScratchCardAsync(int id);
     }
 }

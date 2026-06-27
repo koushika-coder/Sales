@@ -1,0 +1,305 @@
+using Microsoft.EntityFrameworkCore;
+using Sales.Data;
+using Sales.DTOs;
+
+namespace Sales.Services
+{
+    public interface IReportService
+    {
+        Task<List<ReportListItem>> GetAllReportsAsync();
+        Task<ReportDetailResponse?> GetReportByDateAsync(DateOnly date);
+    }
+
+    public class ReportService : IReportService
+    {
+        private readonly SalesDbContext _db;
+        private readonly IGmailService _gmail;
+
+        public ReportService(SalesDbContext db, IGmailService gmail)
+        {
+            _db = db;
+            _gmail = gmail;
+        }
+
+        // ── All committed dates, newest first ────────────────────────────────
+
+        public async Task<List<ReportListItem>> GetAllReportsAsync()
+        {
+            // Staff commits with their user
+            var commits = await _db.SummaryCommits
+                .Include(c => c.User)
+                .OrderByDescending(c => c.Date)
+                .ToListAsync();
+
+            var staffDates = commits.Select(c => c.Date).ToHashSet();
+
+            // Admin reconciliations
+            var adminRecs = await _db.AdminReconciliations
+                .Where(r => r.Status == "submitted")
+                .ToListAsync();
+
+            var adminRecByDate = adminRecs.ToDictionary(r => r.Date);
+
+            // Load all relevant user names in one query (staff + admins)
+            var allUserIds = commits.Select(c => c.UserId)
+                .Concat(adminRecs.Where(r => r.SubmittedByAdminId.HasValue)
+                                 .Select(r => r.SubmittedByAdminId!.Value))
+                .Distinct()
+                .ToList();
+
+            var userNames = await _db.Users
+                .Where(u => allUserIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.Name);
+
+            var result = new List<ReportListItem>();
+
+            // Staff-committed dates (with optional admin reconciliation overlay)
+            foreach (var commit in commits)
+            {
+                adminRecByDate.TryGetValue(commit.Date, out var adminRec);
+                string? adminName = null;
+                if (adminRec?.SubmittedByAdminId is int aid)
+                    userNames.TryGetValue(aid, out adminName);
+
+                var summaryTotal = adminRec?.SummaryTotal ?? commit.SummaryTotal;
+                var zTotal       = adminRec?.ZReportTotal ?? commit.ZReportTotal;
+                var variance     = adminRec?.Difference   ?? commit.Difference;
+
+                result.Add(new ReportListItem
+                {
+                    Date            = commit.Date,
+                    SummaryTotal    = summaryTotal,
+                    ZReportTotal    = zTotal,
+                    Variance        = variance,
+                    WithinThreshold = variance <= 5m,
+                    IsStaffCommitted  = true,
+                    IsAdminReconciled = adminRec is not null,
+                    CommittedAt       = commit.CommittedAt,
+                    CommittedByUserId = commit.UserId,
+                    CommittedByName   = commit.User?.Name ?? userNames.GetValueOrDefault(commit.UserId) ?? $"User #{commit.UserId}",
+                    AdminSubmittedByAdminId = adminRec?.SubmittedByAdminId,
+                    AdminSubmittedByName    = adminName,
+                    AdminSubmittedAt        = adminRec?.SubmittedAt,
+                });
+            }
+
+            // Admin-only dates (no staff commit)
+            foreach (var adminRec in adminRecs.Where(r => !staffDates.Contains(r.Date))
+                                              .OrderByDescending(r => r.Date))
+            {
+                string? adminName = null;
+                if (adminRec.SubmittedByAdminId is int aid)
+                    userNames.TryGetValue(aid, out adminName);
+
+                result.Add(new ReportListItem
+                {
+                    Date            = adminRec.Date,
+                    SummaryTotal    = adminRec.SummaryTotal,
+                    ZReportTotal    = adminRec.ZReportTotal,
+                    Variance        = adminRec.Difference,
+                    WithinThreshold = adminRec.Difference <= 5m,
+                    IsStaffCommitted  = false,
+                    IsAdminReconciled = true,
+                    CommittedAt       = null,
+                    CommittedByUserId = null,
+                    CommittedByName   = null,
+                    AdminSubmittedByAdminId = adminRec.SubmittedByAdminId,
+                    AdminSubmittedByName    = adminName,
+                    AdminSubmittedAt        = adminRec.SubmittedAt,
+                });
+            }
+
+            return result.OrderByDescending(r => r.Date).ToList();
+        }
+
+        // ── Full detail for a single date ────────────────────────────────────
+
+        public async Task<ReportDetailResponse?> GetReportByDateAsync(DateOnly date)
+        {
+            var commit = await _db.SummaryCommits
+                .Include(c => c.User)
+                .FirstOrDefaultAsync(c => c.Date == date);
+
+            var adminRec = await _db.AdminReconciliations
+                .FirstOrDefaultAsync(r => r.Date == date && r.Status == "submitted");
+
+            if (commit is null && adminRec is null) return null;
+
+            var rangeStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var rangeEnd   = rangeStart.AddDays(1);
+
+            // Filter by the staff user who committed this date (if available).
+            int? userId = commit?.UserId;
+
+            // ── Staff entered values ──────────────────────────────────────────
+            var ccBase = _db.CreditCardBanking
+                .Where(c => c.CreatedDate >= rangeStart && c.CreatedDate < rangeEnd);
+            if (userId.HasValue) ccBase = ccBase.Where(c => c.UserId == userId.Value);
+
+            var manualCard = await ccBase.SumAsync(c => (decimal?)c.ManualCardAmount) ?? 0m;
+            var cardAmount = await ccBase.SumAsync(c => (decimal?)c.CardAmount) ?? 0m;
+
+            var safeDrop      = await _db.SafeDrops.FirstOrDefaultAsync(s => s.Date == date);
+            var lastSafe      = safeDrop?.LastSafe ?? 0m;
+            var safeDropAmount = safeDrop?.SafeDropAmount ?? 0m;
+            var cash          = lastSafe + safeDropAmount;
+
+            var dedBase = _db.Deductions
+                .Where(d => d.CreatedAt >= rangeStart && d.CreatedAt < rangeEnd);
+            if (userId.HasValue) dedBase = dedBase.Where(d => d.UserId == userId.Value);
+
+            var deduction = await dedBase
+                .OrderByDescending(d => d.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            var ilBase = _db.LotteryInventory
+                .Where(li => li.InventoryDate >= rangeStart && li.InventoryDate < rangeEnd);
+            if (userId.HasValue) ilBase = ilBase.Where(li => li.UserId == userId.Value);
+
+            var ilSales = await ilBase.SumAsync(li => (decimal?)li.Sales) ?? 0m;
+
+            var lotBase = _db.Lotteries
+                .Where(l => l.CreatedDate >= rangeStart && l.CreatedDate < rangeEnd);
+            if (userId.HasValue) lotBase = lotBase.Where(l => l.UserId == userId.Value);
+
+            var lottery = await lotBase.OrderByDescending(l => l.CreatedDate).FirstOrDefaultAsync();
+
+            var ppBase = _db.Paypoints
+                .Where(p => p.CreatedDate >= rangeStart && p.CreatedDate < rangeEnd);
+            if (userId.HasValue) ppBase = ppBase.Where(p => p.UserId == userId.Value);
+
+            var paypoint = await ppBase.OrderByDescending(p => p.CreatedDate).FirstOrDefaultAsync();
+
+            // ── Z-Report email matched by received date ───────────────────────
+            var zValues    = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var zAvailable = false;
+
+            try
+            {
+                var emails = await _gmail.GetEmailsAsync(new GmailRequest
+                {
+                    SubjectKeyword = "Z-Report",
+                    MaxResults     = 50,
+                });
+
+                var zEmail = emails.FirstOrDefault(e =>
+                    ParseEmailReceivedDate(e.Date) == date &&
+                    !e.Body.TrimStart().StartsWith('<') &&
+                    e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase));
+
+                if (zEmail is not null)
+                {
+                    zValues    = ParseZReportLines(zEmail.Body);
+                    zAvailable = zValues.Count > 0;
+                }
+            }
+            catch { /* Gmail unavailable — fall back to stored totals */ }
+
+            decimal Z(string key) => zValues.TryGetValue(key, out var v) ? v : 0m;
+            decimal ZAbs(string key) => Math.Abs(Z(key));
+
+            // ── Per-field comparison rows ─────────────────────────────────────
+            var fields = new List<ReportFieldRow>
+            {
+                Row("Credit Card",    "Manual Card Amount",       manualCard,                              Z("MANUAL CARD")),
+                Row("Credit Card",    "Card Amount",               cardAmount,                              Z("CARD")),
+                Row("Cash",           "Last Safe",                 lastSafe,                                0m),
+                Row("Cash",           "Safe Drop Amount",          safeDropAmount,                          0m),
+                Row("Cash",           "Cash Total",                cash,                                    Z("CASH")),
+                Row("Deductions",     "Cashback",                  deduction?.Cashback ?? 0m,               ZAbs("CASH BACK (Net)")),
+                Row("Deductions",     "Paypoint Payout",           deduction?.PaypointPayout ?? 0m,         ZAbs("PAYPOINT PO")),
+                Row("Deductions",     "Instant Lottery Payout",    deduction?.InstantLotteryPayout ?? 0m,   ZAbs("INST PO")),
+                Row("Deductions",     "News Voucher",              deduction?.NewsVoucher ?? 0m,            ZAbs("VOUCHER")),
+                Row("Deductions",     "DD Point",                  deduction?.DDPoint ?? 0m,                ZAbs("DD REDEEM")),
+                Row("Deductions",     "Lottery Payout",            deduction?.LotteryPayout ?? 0m,          0m),
+                Row("Instant Lottery","Total Sales",               ilSales,                                 Z("INSTANT LOTTERY")),
+                Row("Lottery",        "Lottery Value",             lottery?.LotteryValue ?? 0m,             Z("LOTTERY")),
+                Row("Paypoint",       "Paypoint Value",            paypoint?.PaypointValue ?? 0m,           Z("PAYPOINT")),
+            };
+
+            // ── Totals — use stored commit/adminRec values for accuracy ────────
+            string? adminName = null;
+            if (adminRec?.SubmittedByAdminId is int adminId)
+            {
+                adminName = await _db.Users
+                    .Where(u => u.Id == adminId)
+                    .Select(u => u.Name)
+                    .FirstOrDefaultAsync();
+            }
+
+            var storedZTotal = adminRec?.ZReportTotal ?? commit?.ZReportTotal ?? 0m;
+            var zTotal = zAvailable
+                ? (Z("DEPARTMENT TOTAL") is var dt && dt > 0m ? dt : Z("GRAND TOTAL"))
+                : storedZTotal;
+
+            var staffTotal = adminRec?.SummaryTotal ?? commit?.SummaryTotal
+                ?? (manualCard + cardAmount + cash
+                    + (deduction?.Cashback ?? 0m) + (deduction?.PaypointPayout ?? 0m)
+                    + (deduction?.InstantLotteryPayout ?? 0m) + (deduction?.NewsVoucher ?? 0m)
+                    + (deduction?.DDPoint ?? 0m) + (deduction?.LotteryPayout ?? 0m)
+                    + ilSales + (lottery?.LotteryValue ?? 0m) + (paypoint?.PaypointValue ?? 0m));
+
+            var variance = Math.Abs(staffTotal - zTotal);
+
+            return new ReportDetailResponse
+            {
+                Date              = date,
+                Fields            = fields,
+                StaffTotal        = staffTotal,
+                ZReportTotal      = zTotal,
+                TotalVariance     = variance,
+                WithinThreshold   = variance <= 5m,
+                CommittedByUserId = commit?.UserId,
+                CommittedByName   = commit?.User?.Name ?? (commit != null ? $"User #{commit.UserId}" : null),
+                CommittedAt       = commit?.CommittedAt,
+                AdminSubmittedByAdminId = adminRec?.SubmittedByAdminId,
+                AdminSubmittedByName    = adminName,
+                AdminSubmittedAt        = adminRec?.SubmittedAt,
+                ZReportAvailable        = zAvailable,
+            };
+        }
+
+        private static DateOnly? ParseEmailReceivedDate(string emailDate)
+        {
+            if (string.IsNullOrWhiteSpace(emailDate)) return null;
+            if (DateTimeOffset.TryParse(emailDate,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var dto))
+                return DateOnly.FromDateTime(dto.DateTime);
+            return null;
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+
+        private static ReportFieldRow Row(string section, string field, decimal staff, decimal z) =>
+            new() { Section = section, Field = field, StaffValue = staff, ZReportValue = z, Variance = staff - z };
+
+        private static Dictionary<string, decimal> ParseZReportLines(string body)
+        {
+            var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawLine in body.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r').Trim();
+                while (line.StartsWith('>'))
+                    line = line.TrimStart('>').TrimStart();
+                var lastSpace = line.LastIndexOf(' ');
+                if (lastSpace < 0) continue;
+
+                var label    = line[..lastSpace].TrimEnd();
+                var valueStr = line[(lastSpace + 1)..].Trim();
+
+                if (string.IsNullOrEmpty(label)) continue;
+
+                if (decimal.TryParse(
+                        valueStr.Replace(",", ""),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var val))
+                {
+                    result[label] = val;
+                }
+            }
+            return result;
+        }
+    }
+}

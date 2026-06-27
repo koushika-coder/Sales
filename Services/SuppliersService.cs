@@ -113,7 +113,51 @@ namespace Sales.Services
             _db.SupplierInvoices.Remove(invoice);
             await _db.SaveChangesAsync();
         }
+
+        public async Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync()
+        {
+            return await _db.SupplierInvoices
+                .GroupBy(i => DateOnly.FromDateTime(i.CreatedAt))
+                .Select(g => new InvoiceDateSummary
+                {
+                    Date = g.Key,
+                    InvoiceCount = g.Count(),
+                    TotalValue = g.Sum(i => i.Value),
+                })
+                .OrderByDescending(x => x.Date)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByDateAsync(DateOnly date)
+        {
+            var start = date.ToDateTime(TimeOnly.MinValue);
+            var end   = start.AddDays(1);
+
+            var invoices = await _db.SupplierInvoices
+                .Include(i => i.Supplier)
+                .Where(i => i.CreatedAt >= start && i.CreatedAt < end)
+                .OrderByDescending(i => i.CreatedAt)
+                .ToListAsync();
+
+            var userIds = invoices.Select(i => i.UserId).Distinct().ToList();
+            var userNames = await _db.Users
+                .Where(u => userIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.Name);
+
+            return invoices.Select(i => new SupplierInvoiceResponse
+            {
+                Id = i.Id,
+                UserId = i.UserId,
+                UserName = userNames.TryGetValue(i.UserId, out var n) ? n : $"User #{i.UserId}",
+                SupplierId = i.SupplierId,
+                SupplierName = i.Supplier.Name,
+                InvoiceNo = i.InvoiceNo,
+                Value = i.Value,
+                CreatedAt = i.CreatedAt,
+            });
+        }
     }
+
     public interface ISuppliersService
     {
         Task<IEnumerable<SupplierResponse>> GetAllSuppliers();
@@ -122,5 +166,7 @@ namespace Sales.Services
         Task<IEnumerable<SupplierInvoiceResponse>> GetTodayInvoices(int userId);
         Task AddInvoice(int userId, AddSupplierInvoiceRequest request);
         Task DeleteInvoice(int userId, int invoiceId);
+        Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync();
+        Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByDateAsync(DateOnly date);
     }
 }

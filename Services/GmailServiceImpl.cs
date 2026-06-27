@@ -40,7 +40,11 @@ namespace Sales.Services
                 "https://oauth2.googleapis.com/token",
                 new FormUrlEncodedContent(values));
 
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                throw new Exception($"Google token exchange failed ({response.StatusCode}): {errorBody}");
+            }
 
             var json = await response.Content.ReadAsStringAsync();
 
@@ -56,7 +60,9 @@ namespace Sales.Services
             GetEmailsAsync(GmailRequest request)
         {
             var config = await _context.GmailConfiguration
-                .FirstOrDefaultAsync(x => x.IsActive);
+                .Where(x => x.IsActive)
+                .OrderByDescending(x => x.CreatedDate)
+                .FirstOrDefaultAsync();
 
             if (config == null)
                 throw new Exception(
@@ -96,6 +102,12 @@ namespace Sales.Services
                 gmailRequest.Q +=
                     $" subject:\"{request.SubjectKeyword}\"";
             }
+
+            if (request.AfterDate.HasValue)
+                gmailRequest.Q += $" after:{request.AfterDate.Value:yyyy/MM/dd}";
+
+            if (request.BeforeDate.HasValue)
+                gmailRequest.Q += $" before:{request.BeforeDate.Value:yyyy/MM/dd}";
 
             gmailRequest.MaxResults =
                 request.MaxResults;

@@ -1,5 +1,169 @@
 namespace Sales.DTOs
 {
+    // ── Admin Reconciliation DTOs ─────────────────────────────────────────────
+
+    public class PendingReconciliationResponse
+    {
+        public bool HasPending { get; set; }
+        public int Id { get; set; }
+        public DateOnly Date { get; set; }
+
+        // Credit Card
+        public decimal ManualCardAmount { get; set; }
+        public decimal CardAmount { get; set; }
+
+        // Cash
+        public decimal LastSafe { get; set; }
+        public decimal SafeDropAmount { get; set; }
+        public decimal Cash => LastSafe + SafeDropAmount;
+
+        // Deductions
+        public decimal Cashback { get; set; }
+        public decimal PaypointPayout { get; set; }
+        public decimal InstantLotteryPayout { get; set; }
+        public decimal NewsVoucher { get; set; }
+        public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
+
+        // Instant Lottery
+        public int InstantLotteryTotalCount { get; set; }
+        public decimal InstantLotteryTotalSales { get; set; }
+
+        // Lottery / Paypoint
+        public decimal LotteryValue { get; set; }
+        public decimal PaypointValue { get; set; }
+
+        // Totals
+        public decimal SummaryTotal { get; set; }
+        public decimal ZReportTotal { get; set; }
+        public decimal Difference { get; set; }
+
+        public DateTime CreatedAt { get; set; }
+    }
+
+    // Date-picker list: one row per committed date
+    public class CommittedSummaryListItem
+    {
+        public int Id { get; set; }
+        public DateOnly Date { get; set; }
+        public decimal SummaryTotal { get; set; }
+        public decimal ZReportTotal { get; set; }
+        public decimal Difference { get; set; }
+        public DateTime CommittedAt { get; set; }
+    }
+
+    // Full breakdown for a single committed date
+    public class CommittedSummaryDetailResponse
+    {
+        public int CommitId { get; set; }
+        public DateOnly Date { get; set; }
+
+        // Credit Card
+        public decimal ManualCardAmount { get; set; }
+        public decimal CardAmount { get; set; }
+
+        // Cash
+        public decimal LastSafe { get; set; }
+        public decimal SafeDropAmount { get; set; }
+        public decimal Cash => LastSafe + SafeDropAmount;
+
+        // Deductions
+        public decimal Cashback { get; set; }
+        public decimal PaypointPayout { get; set; }
+        public decimal InstantLotteryPayout { get; set; }
+        public decimal NewsVoucher { get; set; }
+        public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
+
+        // Instant Lottery
+        public int InstantLotteryTotalCount { get; set; }
+        public decimal InstantLotteryTotalSales { get; set; }
+
+        // Lottery / Paypoint
+        public decimal LotteryValue { get; set; }
+        public decimal PaypointValue { get; set; }
+
+        // Totals
+        public decimal SummaryTotal { get; set; }
+        public decimal ZReportTotal { get; set; }
+        public decimal Difference { get; set; }
+
+        public DateTime CommittedAt { get; set; }
+    }
+
+    public class AdminSubmitReconciliationRequest
+    {
+        public DateOnly Date { get; set; }   // which day is being submitted
+
+        // Credit Card
+        public decimal ManualCardAmount { get; set; }
+        public decimal CardAmount { get; set; }
+
+        // Cash
+        public decimal LastSafe { get; set; }
+        public decimal SafeDropAmount { get; set; }
+
+        // Deductions
+        public decimal Cashback { get; set; }
+        public decimal PaypointPayout { get; set; }
+        public decimal InstantLotteryPayout { get; set; }
+        public decimal NewsVoucher { get; set; }
+        public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
+
+        // Lottery / Paypoint
+        public decimal LotteryValue { get; set; }
+        public decimal PaypointValue { get; set; }
+
+        // Totals
+        public decimal SummaryTotal { get; set; }
+        public decimal ZReportTotal { get; set; }
+        public decimal Difference { get; set; }
+
+        public string? AdminNotes { get; set; }
+    }
+
+    public class ReconciliationPortalResponse
+    {
+        public bool HasReconciliation { get; set; }
+        public int Id { get; set; }
+        public DateOnly Date { get; set; }
+
+        // Credit Card
+        public decimal ManualCardAmount { get; set; }
+        public decimal CardAmount { get; set; }
+
+        // Cash
+        public decimal LastSafe { get; set; }
+        public decimal SafeDropAmount { get; set; }
+        public decimal Cash => LastSafe + SafeDropAmount;
+
+        // Deductions
+        public decimal Cashback { get; set; }
+        public decimal PaypointPayout { get; set; }
+        public decimal InstantLotteryPayout { get; set; }
+        public decimal NewsVoucher { get; set; }
+        public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
+
+        // Instant Lottery
+        public int InstantLotteryTotalCount { get; set; }
+        public decimal InstantLotteryTotalSales { get; set; }
+
+        // Lottery / Paypoint
+        public decimal LotteryValue { get; set; }
+        public decimal PaypointValue { get; set; }
+
+        // Totals
+        public decimal SummaryTotal { get; set; }
+        public decimal ZReportTotal { get; set; }
+        public decimal Difference { get; set; }
+
+        public string? AdminNotes { get; set; }
+        public DateTime SubmittedAt { get; set; }
+    }
+
+
     public class CreditCardSummaryEntry
     {
         public int Id { get; set; }
@@ -33,9 +197,11 @@ namespace Sales.DTOs
         public decimal InstantLotteryPayout { get; set; }
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
 
-        // Instant Lottery Inventory — computed sum, read-only
-        public decimal InstantLotteryTotalSales { get; set; }
+        // Instant Lottery Inventory — computed sums, read-only
+        public int InstantLotteryTotalCount { get; set; }   // total scratch cards sold
+        public decimal InstantLotteryTotalSales { get; set; } // total £ value sold
 
         // Lottery Management
         public decimal LotteryValue { get; set; }
@@ -63,6 +229,8 @@ namespace Sales.DTOs
         public decimal ZReportTotal { get; set; }
         public decimal Difference { get; set; }
         public DateTime CommittedAt { get; set; }
+        // The next active date's summary — frontend should replace the dashboard with this
+        public SummaryResponse NewSummary { get; set; } = null!;
     }
 
     public class ZReportFieldComparison
@@ -77,11 +245,19 @@ namespace Sales.DTOs
     public class ZReportComparisonResponse
     {
         public DateOnly Date { get; set; }
-        public decimal UserTotal { get; set; }         // Cash + Card + ManualCard
+        public decimal UserTotal { get; set; }         // Sum of all user-entered values
         public decimal ZReportGrandTotal { get; set; } // GRAND TOTAL from Z-report
         public decimal TotalDifference { get; set; }   // |UserTotal - ZReportGrandTotal|
         public bool CanCommit { get; set; }            // TotalDifference <= £5
         public List<ZReportFieldComparison> Fields { get; set; } = new();
+    }
+
+    public class ZReportEmailResult
+    {
+        public bool IsCommitted { get; set; }
+        public DateOnly TargetDate { get; set; }
+        public string? Message { get; set; }
+        public GmailMessageResponse? Email { get; set; }
     }
 
     public class SummaryUpdateRequest
@@ -89,7 +265,7 @@ namespace Sales.DTOs
         // Credit Card Banking — send all entries; id=0 creates a new row
         public List<CreditCardSummaryUpdateEntry> CreditCardEntries { get; set; } = new();
 
-        // Cash Banking — updates SafeDrop.LastSafe and SafeDrop.SafeDropAmount
+        // Cash Banking — both entered by the user
         public decimal LastSafe { get; set; }
         public decimal SafeDropAmount { get; set; }
 
@@ -99,6 +275,7 @@ namespace Sales.DTOs
         public decimal InstantLotteryPayout { get; set; }
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
 
         // Lottery Management
         public decimal LotteryValue { get; set; }

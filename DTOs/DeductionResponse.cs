@@ -9,6 +9,7 @@
         public decimal InstantLotteryPayout { get; set; }
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
+        public decimal LotteryPayout { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 }

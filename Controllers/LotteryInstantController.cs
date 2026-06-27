@@ -47,15 +47,11 @@ namespace Sales.Controllers
 
             int userId = int.Parse(userIdClaim);
 
-            await _service.SaveInventory(
-                userId,
-                request);
+            await _service.SaveInventory(userId, request);
 
-            return Ok(new
-            {
-                success = true,
-                message = "Inventory saved successfully"
-            });
+            // Return the full updated list so the UI reflects saved values without an extra GET
+            var updated = await _service.GetTodayInventory(userId);
+            return Ok(updated);
         }
         [HttpGet("report")]
         public async Task<IActionResult> GetReport()

@@ -17,5 +17,7 @@
         public decimal Sales { get; set; }
 
         public DateTime InventoryDate { get; set; }
+
+        public bool IsCommitted { get; set; }
     }
 }

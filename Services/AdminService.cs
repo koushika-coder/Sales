@@ -13,6 +13,8 @@ public interface IAdminService
     Task<PaginatedResponse<AdminDto>> GetAllAdminsAsync(int pageNumber = 1, int pageSize = 10);
     Task<AdminDto?> UpdateAdminAsync(int adminId, string? name, string? department);
     Task<bool> DeleteAdminAsync(int adminId);
+    Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
+    Task<(bool Success, string? Error)> AdminResetPasswordAsync(int adminId, string newPassword, IAuthService authService);
 }
 
 public class AdminService : IAdminService
@@ -115,6 +117,33 @@ public class AdminService : IAdminService
         await _context.SaveChangesAsync();
 
         return true;
+    }
+
+    public async Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService)
+    {
+        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.Email == email && a.IsActive);
+        if (admin == null)
+            return (false, null, null, "No active account found with that email.");
+
+        var tempPassword = Guid.NewGuid().ToString("N")[..8];
+        admin.PasswordHash = authService.HashPassword(tempPassword);
+        admin.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return (true, admin.Name, tempPassword, null);
+    }
+
+    public async Task<(bool Success, string? Error)> AdminResetPasswordAsync(int adminId, string newPassword, IAuthService authService)
+    {
+        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.AdminId == adminId);
+        if (admin == null)
+            return (false, "Admin not found.");
+
+        admin.PasswordHash = authService.HashPassword(newPassword);
+        admin.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return (true, null);
     }
 
     private static AdminDto MapToAdminDto(Admin admin)

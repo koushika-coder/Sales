@@ -2,6 +2,8 @@
 {
     public class LotteryInventoryResponse
     {
+        public int Id { get; set; }         // 0 = no record saved yet for active date
+
         public int LotteryId { get; set; }
 
         public string ScratchCardNo { get; set; }

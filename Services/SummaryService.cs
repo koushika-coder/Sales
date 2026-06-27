@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Sales.Data;
 using Sales.DTOs;
@@ -13,6 +12,8 @@ namespace Sales.Services
         Task<SummaryResponse> UpdateTodayAsync(int userId, SummaryUpdateRequest request);
         Task<ZReportComparisonResponse> GetZReportComparisonAsync(int userId);
         Task<SummaryCommitResponse> CommitTodayAsync(int userId, SummaryCommitRequest request);
+        Task<ZReportEmailResult> GetZReportEmailAsync(int userId);
+        Task<ZReportEmailResult> GetZReportEmailByDateAsync(int userId, DateOnly date);
     }
 
     public class SummaryService : ISummaryService
@@ -28,16 +29,54 @@ namespace Sales.Services
             _email = email;
         }
 
-        public async Task<SummaryResponse> GetTodayAsync(int userId)
+        // Returns yesterday if yesterday is uncommitted (by staff or admin), otherwise today.
+        // If an admin has set an active-date override for this user, that takes priority
+        // (and is automatically cleared once that date becomes committed).
+        private async Task<DateOnly> GetActiveDateAsync(int userId)
         {
-            var today = DateOnly.FromDateTime(DateTime.Today);
-            var todayStart = DateTime.Today;
-            var todayEnd = todayStart.AddDays(1);
+            var ovr = await _db.UserActiveDateOverrides
+                .FirstOrDefaultAsync(o => o.UserId == userId);
+
+            if (ovr is not null)
+            {
+                if (!await IsDateCommittedAsync(userId, ovr.ActiveDate))
+                    return ovr.ActiveDate;
+
+                // Override date is already committed — clean it up and fall through.
+                _db.UserActiveDateOverrides.Remove(ovr);
+                await _db.SaveChangesAsync();
+            }
+
+            var today     = DateOnly.FromDateTime(DateTime.UtcNow);
+            var yesterday = today.AddDays(-1);
+
+            var todayCommitted =
+                await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == today) ||
+                await _db.AdminReconciliations.AnyAsync(r => r.Date == today && r.Status == "submitted");
+            if (todayCommitted) return today.AddDays(1);
+
+            var yesterdayCommitted =
+                await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == yesterday) ||
+                await _db.AdminReconciliations.AnyAsync(r => r.Date == yesterday && r.Status == "submitted");
+            return yesterdayCommitted ? today : yesterday;
+        }
+
+        private async Task<bool> IsDateCommittedAsync(int userId, DateOnly date) =>
+            await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == date) ||
+            await _db.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
+
+        public async Task<SummaryResponse> GetTodayAsync(int userId)
+            => await GetSummaryForDateAsync(userId, await GetActiveDateAsync(userId));
+
+        private async Task<SummaryResponse> GetSummaryForDateAsync(int userId, DateOnly date)
+        {
+            var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var end   = start.AddDays(1);
 
             var creditCardEntries = await _db.CreditCardBanking
                 .Where(c => c.UserId == userId
-                         && c.CreatedDate >= todayStart
-                         && c.CreatedDate < todayEnd)
+                         && c.CreatedDate >= start
+                         && c.CreatedDate < end)
                 .OrderBy(c => c.CreatedDate)
                 .Select(c => new CreditCardSummaryEntry
                 {
@@ -49,50 +88,95 @@ namespace Sales.Services
                 .ToListAsync();
 
             var safeDrop = await _db.SafeDrops
-                .FirstOrDefaultAsync(s => s.Date == today);
+                .FirstOrDefaultAsync(s => s.Date == date);
 
             var deduction = await _db.Deductions
                 .Where(d => d.UserId == userId
-                         && d.CreatedAt >= todayStart
-                         && d.CreatedAt < todayEnd)
+                         && d.CreatedAt >= start
+                         && d.CreatedAt < end)
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
 
-            var instantLotteryTotalSales = await _db.LotteryInventory
+            // Instant lottery: sum inventory for the active date first;
+            // if nothing entered yet, fall back to the most recent uncommitted date's inventory.
+            var instantLotteryQuery = _db.LotteryInventory
                 .Where(li => li.UserId == userId
-                          && li.InventoryDate >= todayStart
-                          && li.InventoryDate < todayEnd)
-                .SumAsync(li => (decimal?)li.Sales) ?? 0m;
+                          && li.InventoryDate >= start
+                          && li.InventoryDate < end);
 
+            var instantLotteryTotalCount = await instantLotteryQuery.SumAsync(li => (int?)li.TotalSold) ?? 0;
+            var instantLotteryTotalSales = await instantLotteryQuery.SumAsync(li => (decimal?)li.Sales) ?? 0m;
+
+            if (instantLotteryTotalCount == 0 && instantLotteryTotalSales == 0m)
+            {
+                // Find the most recent inventory date before today that is not committed.
+                var latestInventoryTs = await _db.LotteryInventory
+                    .Where(li => li.UserId == userId && li.InventoryDate < start)
+                    .MaxAsync(li => (DateTime?)li.InventoryDate);
+
+                if (latestInventoryTs.HasValue)
+                {
+                    var latestDate = DateOnly.FromDateTime(latestInventoryTs.Value);
+                    var latestCommitted =
+                        await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == latestDate) ||
+                        await _db.AdminReconciliations.AnyAsync(r => r.Date == latestDate && r.Status == "submitted");
+
+                    if (!latestCommitted)
+                    {
+                        var fallback = _db.LotteryInventory
+                            .Where(li => li.UserId == userId && li.InventoryDate == latestInventoryTs.Value);
+                        instantLotteryTotalCount = await fallback.SumAsync(li => (int?)li.TotalSold) ?? 0;
+                        instantLotteryTotalSales = await fallback.SumAsync(li => (decimal?)li.Sales) ?? 0m;
+                    }
+                }
+            }
+
+            // Lottery value: active date first, then most recent uncommitted record.
             var lottery = await _db.Lotteries
                 .Where(l => l.UserId == userId
-                         && l.CreatedDate >= todayStart
-                         && l.CreatedDate < todayEnd)
+                         && l.CreatedDate >= start
+                         && l.CreatedDate < end)
                 .OrderByDescending(l => l.CreatedDate)
                 .FirstOrDefaultAsync();
 
+            lottery ??= await _db.Lotteries
+                .Where(l => l.UserId == userId && l.CreatedDate < start)
+                .OrderByDescending(l => l.CreatedDate)
+                .FirstOrDefaultAsync();
+
+            // Paypoint value: active date first, then most recent uncommitted record.
             var paypoint = await _db.Paypoints
                 .Where(p => p.UserId == userId
-                         && p.CreatedDate >= todayStart
-                         && p.CreatedDate < todayEnd)
+                         && p.CreatedDate >= start
+                         && p.CreatedDate < end)
+                .OrderByDescending(p => p.CreatedDate)
+                .FirstOrDefaultAsync();
+
+            paypoint ??= await _db.Paypoints
+                .Where(p => p.UserId == userId && p.CreatedDate < start)
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
 
             var commit = await _db.SummaryCommits
-                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == today);
+                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == date);
+
+            var lastSafe    = safeDrop?.LastSafe      ?? 0m;
+            var closeAmount = safeDrop?.SafeDropAmount ?? 0m;
 
             return new SummaryResponse
             {
-                Date = today,
+                Date = date,
                 CreditCardEntries = creditCardEntries,
-                LastSafe = safeDrop?.LastSafe ?? 0m,
-                SafeDropAmount = safeDrop?.SafeDropAmount ?? 0m,
-                Cash = safeDrop is null ? 0m : safeDrop.LastSafe + safeDrop.SafeDropAmount,
+                LastSafe = lastSafe,
+                SafeDropAmount = closeAmount,
+                Cash = lastSafe + closeAmount,
                 Cashback = deduction?.Cashback ?? 0m,
                 PaypointPayout = deduction?.PaypointPayout ?? 0m,
                 InstantLotteryPayout = deduction?.InstantLotteryPayout ?? 0m,
                 NewsVoucher = deduction?.NewsVoucher ?? 0m,
                 DDPoint = deduction?.DDPoint ?? 0m,
+                LotteryPayout = deduction?.LotteryPayout ?? 0m,
+                InstantLotteryTotalCount = instantLotteryTotalCount,
                 InstantLotteryTotalSales = instantLotteryTotalSales,
                 LotteryValue = lottery?.LotteryValue ?? 0m,
                 PaypointValue = paypoint?.PaypointValue ?? 0m,
@@ -103,9 +187,12 @@ namespace Sales.Services
 
         public async Task<SummaryResponse> UpdateTodayAsync(int userId, SummaryUpdateRequest request)
         {
-            var today = DateOnly.FromDateTime(DateTime.Today);
-            var todayStart = DateTime.Today;
-            var todayEnd = todayStart.AddDays(1);
+            var activeDate  = await GetActiveDateAsync(userId);
+            var activeStart = activeDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var activeEnd   = activeStart.AddDays(1);
+            var recordAt    = activeDate == DateOnly.FromDateTime(DateTime.UtcNow)
+                                ? DateTime.UtcNow
+                                : activeStart.AddHours(12);
 
             // Credit Card Banking — update existing rows or insert new ones
             foreach (var entry in request.CreditCardEntries)
@@ -128,23 +215,23 @@ namespace Sales.Services
                         UserId = userId,
                         ManualCardAmount = entry.ManualCardAmount,
                         CardAmount = entry.CardAmount,
-                        CreatedDate = DateTime.UtcNow,
+                        CreatedDate = recordAt,
                     });
                 }
             }
 
-            // SafeDrop (Cash)
+            // SafeDrop (Cash) — both LastSafe and SafeDropAmount are user-entered
             var safeDrop = await _db.SafeDrops
-                .FirstOrDefaultAsync(s => s.Date == today);
+                .FirstOrDefaultAsync(s => s.Date == activeDate);
 
             if (safeDrop is null)
             {
                 _db.SafeDrops.Add(new SafeDrop
                 {
-                    Date = today,
+                    Date = activeDate,
                     LastSafe = request.LastSafe,
                     SafeDropAmount = request.SafeDropAmount,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = recordAt,
                 });
             }
             else
@@ -157,8 +244,8 @@ namespace Sales.Services
             // Deductions
             var deduction = await _db.Deductions
                 .Where(d => d.UserId == userId
-                         && d.CreatedAt >= todayStart
-                         && d.CreatedAt < todayEnd)
+                         && d.CreatedAt >= activeStart
+                         && d.CreatedAt < activeEnd)
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
 
@@ -172,7 +259,8 @@ namespace Sales.Services
                     InstantLotteryPayout = request.InstantLotteryPayout,
                     NewsVoucher = request.NewsVoucher,
                     DDPoint = request.DDPoint,
-                    CreatedAt = DateTime.UtcNow,
+                    LotteryPayout = request.LotteryPayout,
+                    CreatedAt = recordAt,
                 });
             }
             else
@@ -182,13 +270,14 @@ namespace Sales.Services
                 deduction.InstantLotteryPayout = request.InstantLotteryPayout;
                 deduction.NewsVoucher = request.NewsVoucher;
                 deduction.DDPoint = request.DDPoint;
+                deduction.LotteryPayout = request.LotteryPayout;
             }
 
             // Lottery Management
             var lottery = await _db.Lotteries
                 .Where(l => l.UserId == userId
-                         && l.CreatedDate >= todayStart
-                         && l.CreatedDate < todayEnd)
+                         && l.CreatedDate >= activeStart
+                         && l.CreatedDate < activeEnd)
                 .OrderByDescending(l => l.CreatedDate)
                 .FirstOrDefaultAsync();
 
@@ -198,8 +287,8 @@ namespace Sales.Services
                 {
                     UserId = userId,
                     LotteryValue = request.LotteryValue,
-                    CreatedDate = DateTime.UtcNow,
-                    UpdatedDate = DateTime.UtcNow,
+                    CreatedDate = recordAt,
+                    UpdatedDate = recordAt,
                 });
             }
             else
@@ -211,8 +300,8 @@ namespace Sales.Services
             // Paypoint Management
             var paypoint = await _db.Paypoints
                 .Where(p => p.UserId == userId
-                         && p.CreatedDate >= todayStart
-                         && p.CreatedDate < todayEnd)
+                         && p.CreatedDate >= activeStart
+                         && p.CreatedDate < activeEnd)
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
 
@@ -222,8 +311,8 @@ namespace Sales.Services
                 {
                     UserId = userId,
                     PaypointValue = request.PaypointValue,
-                    CreatedDate = DateTime.UtcNow,
-                    UpdatedDate = DateTime.UtcNow,
+                    CreatedDate = recordAt,
+                    UpdatedDate = recordAt,
                 });
             }
             else
@@ -239,62 +328,166 @@ namespace Sales.Services
 
         public async Task<ZReportComparisonResponse> GetZReportComparisonAsync(int userId)
         {
-            var summary = await GetTodayAsync(userId);
+            var targetDate = await GetActiveDateAsync(userId);
 
+            if (await IsDateCommittedAsync(userId, targetDate))
+                throw new InvalidOperationException(
+                    $"Values for {targetDate:dd-MM-yyyy} are already committed.");
+
+            var summary = await GetSummaryForDateAsync(userId, targetDate);
+
+            // Search recent Z-report emails without a date-range filter — the email may
+            // arrive days after the POS date, so we match by the date inside the body.
             var emails = await _gmail.GetEmailsAsync(new GmailRequest
             {
-                SubjectKeyword = "Z Report",
-                MaxResults = 1
+                SubjectKeyword = "Z-Report",
+                MaxResults     = 50,
             });
 
-            if (emails.Count == 0)
-                throw new InvalidOperationException("No Z-report email found. Please ensure the Z-report has been received.");
+            // Require plain text, "GRAND TOTAL" marker, and body POS date == active date.
+            var zEmail = emails.FirstOrDefault(e =>
+                    !e.Body.TrimStart().StartsWith('<') &&
+                    e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase) &&
+                    ParseEmailReceivedDate(e.Date) == targetDate)
+                ?? throw new InvalidOperationException($"No Z-report email found for {targetDate:dd-MM-yyyy}. Please ensure the plain-text Z-report has been received.");
 
-            var body = emails[0].Body;
+            var body = zEmail.Body;
 
-            // Parse Z-report fields
-            var zManualCard     = ParseField(body, @"^MANUAL\s+CARD\s+([\d,]+\.?\d*)");
-            var zCard           = ParseField(body, @"^CARD\s+([\d,]+\.?\d*)");
-            var zCash           = ParseField(body, @"^CASH(?!\s+BACK)\s+([\d,]+\.?\d*)");
-            var zCashBack       = ParseAbs  (body, @"CASH\s+BACK\s*\(Net\)\s+([-\d,]+\.?\d*)");
-            var zInstPO         = ParseAbs  (body, @"^INST\s+PO\s+([-\d,]+\.?\d*)");
-            var zPaypointPO     = ParseAbs  (body, @"^PAYPOINT\s+PO\s+([-\d,]+\.?\d*)");
-            var zVoucher        = ParseAbs  (body, @"^VOUCHER\s+([-\d,]+\.?\d*)");
-            var zDdRedeem       = ParseAbs  (body, @"^DD\s+REDEEM\s+([-\d,]+\.?\d*)");
-            var zInstantLottery = ParseField(body, @"^INSTANT\s+LOTTERY\s+([\d,]+\.?\d*)");
-            var zLottery        = ParseField(body, @"^LOTTERY\s+([\d,]+\.?\d*)");
-            var zPaypoint       = ParseField(body, @"^PAYPOINT(?!\s+PO)\s+([\d,]+\.?\d*)");
-            var zGrandTotal     = ParseField(body, @"^GRAND\s+TOTAL\s+([\d,]+\.?\d*)");
+            // Line-by-line parser: each line is "LABEL   VALUE" — the last whitespace-separated
+            // token is the numeric value, the rest is the label. This avoids multiline ^ issues.
+            var z = ParseZReportLines(body);
+
+            decimal GetZ(string label) => z.TryGetValue(label, out var v) ? v : 0m;
+
+            // Prefer "DEPARTMENT TOTAL" if present, otherwise fall back to "GRAND TOTAL"
+            var zDeptTotal = z.TryGetValue("DEPARTMENT TOTAL", out var dt) ? dt
+                           : z.TryGetValue("DEPT TOTAL",       out var dt2) ? dt2
+                           : GetZ("GRAND TOTAL");
+
+            // Supplier invoices total for the date (all users — store-level like the Z-report)
+            var invStart = targetDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var invEnd   = invStart.AddDays(1);
+            var supplierInvoicesTotal = await _db.SupplierInvoices
+                .Where(i => i.CreatedAt >= invStart && i.CreatedAt < invEnd)
+                .SumAsync(i => (decimal?)i.Value) ?? 0m;
 
             var userManualCard = summary.CreditCardEntries.Sum(e => e.ManualCardAmount);
             var userCard       = summary.CreditCardEntries.Sum(e => e.CardAmount);
-            var userCash       = summary.Cash;
-            var userTotal      = userCash + userCard + userManualCard;
-            var totalDiff      = Math.Abs(userTotal - zGrandTotal);
+
+            // Sum of all user-entered values compared against the Z-report department total
+            var userTotal = userManualCard
+                          + userCard
+                          + summary.Cash
+                          + summary.Cashback
+                          + summary.PaypointPayout
+                          + summary.InstantLotteryPayout
+                          + summary.NewsVoucher
+                          + summary.DDPoint
+                          + summary.LotteryPayout
+                          + summary.InstantLotteryTotalSales
+                          + summary.LotteryValue
+                          + summary.PaypointValue
+                          + supplierInvoicesTotal;
+
+            var totalDiff = Math.Abs(userTotal - zDeptTotal);
 
             var fields = new List<ZReportFieldComparison>
             {
-                Cmp("Credit Card Banking",    "Manual Card Amount",       userManualCard,                  zManualCard),
-                Cmp("Credit Card Banking",    "Card Amount",               userCard,                        zCard),
-                Cmp("Cash Banking",           "Cash",                      userCash,                        zCash),
-                Cmp("Deductions",             "Cashback",                  summary.Cashback,                zCashBack),
-                Cmp("Deductions",             "Paypoint Payout",           summary.PaypointPayout,          zPaypointPO),
-                Cmp("Deductions",             "Instant Lottery Payout",    summary.InstantLotteryPayout,    zInstPO),
-                Cmp("Deductions",             "News Voucher",              summary.NewsVoucher,             zVoucher),
-                Cmp("Deductions",             "DD Point",                  summary.DDPoint,                 zDdRedeem),
-                Cmp("Instant Lottery",        "Total Sales",               summary.InstantLotteryTotalSales, zInstantLottery),
-                Cmp("Lottery Management",     "Lottery Value",             summary.LotteryValue,            zLottery),
-                Cmp("Paypoint Management",    "Paypoint Value",            summary.PaypointValue,           zPaypoint),
+                Cmp("Credit Card Banking", "Manual Card Amount",    userManualCard,                   0),
+                Cmp("Credit Card Banking", "Card Amount",            userCard,                         0),
+                Cmp("Cash Banking",        "Cash",                   summary.Cash,                     0),
+                Cmp("Deductions",          "Cashback",               summary.Cashback,                 0),
+                Cmp("Deductions",          "Paypoint Payout",        summary.PaypointPayout,           0),
+                Cmp("Deductions",          "Instant Lottery Payout", summary.InstantLotteryPayout,     0),
+                Cmp("Deductions",          "News Voucher",           summary.NewsVoucher,              0),
+                Cmp("Deductions",          "DD Point",               summary.DDPoint,                  0),
+                Cmp("Deductions",          "Lottery Payout",         summary.LotteryPayout,            0),
+                Cmp("Instant Lottery",     "Total Sales",            summary.InstantLotteryTotalSales, 0),
+                Cmp("Lottery Management",  "Lottery Value",          summary.LotteryValue,             0),
+                Cmp("Paypoint Management", "Paypoint Value",         summary.PaypointValue,            0),
+                Cmp("Supplier Invoices",   "Total Invoices",         supplierInvoicesTotal,            0),
             };
 
             return new ZReportComparisonResponse
             {
-                Date             = summary.Date,
-                UserTotal        = userTotal,
-                ZReportGrandTotal = zGrandTotal,
-                TotalDifference  = totalDiff,
-                CanCommit        = totalDiff <= 5m,
-                Fields           = fields,
+                Date              = summary.Date,
+                UserTotal         = userTotal,
+                ZReportGrandTotal = zDeptTotal,
+                TotalDifference   = totalDiff,
+                CanCommit         = totalDiff <= 5m,
+                Fields            = fields,
+            };
+        }
+
+        public async Task<ZReportEmailResult> GetZReportEmailAsync(int userId)
+        {
+            var targetDate = await GetActiveDateAsync(userId);
+
+            if (await IsDateCommittedAsync(userId, targetDate))
+            {
+                return new ZReportEmailResult
+                {
+                    IsCommitted = true,
+                    TargetDate  = targetDate,
+                    Message     = $"Values for {targetDate:dd-MM-yyyy} are already committed.",
+                    Email       = null,
+                };
+            }
+
+            var emails = await _gmail.GetEmailsAsync(new GmailRequest
+            {
+                SubjectKeyword = "Z-Report",
+                MaxResults     = 50,
+            });
+
+            var zEmail = emails.FirstOrDefault(e =>
+                    !e.Body.TrimStart().StartsWith('<') &&
+                    e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase) &&
+                    ParseEmailReceivedDate(e.Date) == targetDate)
+                ?? throw new InvalidOperationException(
+                    $"No Z-report email found for {targetDate:dd-MM-yyyy}. Please ensure the plain-text Z-report has been received.");
+
+            return new ZReportEmailResult
+            {
+                IsCommitted = false,
+                TargetDate  = targetDate,
+                Message     = null,
+                Email       = zEmail,
+            };
+        }
+
+        public async Task<ZReportEmailResult> GetZReportEmailByDateAsync(int userId, DateOnly date)
+        {
+            if (await IsDateCommittedAsync(userId, date))
+            {
+                return new ZReportEmailResult
+                {
+                    IsCommitted = true,
+                    TargetDate  = date,
+                    Message     = $"Values for {date:dd-MM-yyyy} are already committed.",
+                    Email       = null,
+                };
+            }
+
+            var emails = await _gmail.GetEmailsAsync(new GmailRequest
+            {
+                SubjectKeyword = "Z-Report",
+                MaxResults     = 50,
+            });
+
+            var zEmail = emails.FirstOrDefault(e =>
+                    !e.Body.TrimStart().StartsWith('<') &&
+                    e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase) &&
+                    ParseEmailReceivedDate(e.Date) == date)
+                ?? throw new InvalidOperationException(
+                    $"No Z-report email found for {date:dd-MM-yyyy}. Please ensure the plain-text Z-report has been received.");
+
+            return new ZReportEmailResult
+            {
+                IsCommitted = false,
+                TargetDate  = date,
+                Message     = null,
+                Email       = zEmail,
             };
         }
 
@@ -303,43 +496,114 @@ namespace Sales.Services
         private static ZReportFieldComparison Cmp(string section, string field, decimal user, decimal zReport) =>
             new() { Section = section, Field = field, UserValue = user, ZReportValue = zReport, Difference = user - zReport };
 
-        private static decimal ParseField(string body, string pattern)
+        // Parses the RFC 2822 "Date" header of an email and returns the date in the
+        // timezone the sender used — this is the date the user sees in their inbox.
+        private static DateOnly? ParseEmailReceivedDate(string emailDate)
         {
-            var m = Regex.Match(body, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            if (!m.Success) return 0m;
-            return decimal.TryParse(
-                m.Groups[1].Value.Replace(",", ""),
-                System.Globalization.NumberStyles.Any,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var v) ? v : 0m;
+            if (string.IsNullOrWhiteSpace(emailDate)) return null;
+            if (DateTimeOffset.TryParse(
+                    emailDate,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out var dto))
+                return DateOnly.FromDateTime(dto.DateTime);
+            return null;
         }
 
-        private static decimal ParseAbs(string body, string pattern) =>
-            Math.Abs(ParseField(body, pattern));
+        // Parses the Z-report plain-text body line by line.
+        // Each line has the form "LABEL   <number>" — we take the last whitespace-separated
+        // token as the value and everything before it (trimmed) as the label.
+        private static Dictionary<string, decimal> ParseZReportLines(string body)
+        {
+            var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawLine in body.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r').Trim();
+                // Strip email reply quote characters ("> ", ">> ", etc.)
+                while (line.StartsWith('>'))
+                    line = line.TrimStart('>').TrimStart();
+                var lastSpace = line.LastIndexOf(' ');
+                if (lastSpace < 0) continue;
+
+                var label    = line[..lastSpace].TrimEnd();
+                var valueStr = line[(lastSpace + 1)..].Trim();
+
+                if (string.IsNullOrEmpty(label)) continue;
+
+                var cleaned = valueStr.Replace(",", "").Replace("£", "").Replace("$", "").Trim();
+                if (decimal.TryParse(
+                        cleaned,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var val))
+                {
+                    result[label] = val;
+                }
+            }
+            return result;
+        }
 
         public async Task<SummaryCommitResponse> CommitTodayAsync(int userId, SummaryCommitRequest request)
         {
-            var today = DateOnly.FromDateTime(DateTime.Today);
+            var activeDate = await GetActiveDateAsync(userId);
 
             var existing = await _db.SummaryCommits
-                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == today);
+                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == activeDate);
 
             if (existing is not null)
-                throw new InvalidOperationException("Today's summary is already committed.");
+                throw new InvalidOperationException("This day's summary is already committed.");
 
-            // Run Z-report comparison to get full field details for the email
+            // Try to get full Z-report field breakdown for the email
             ZReportComparisonResponse? comparison = null;
             try { comparison = await GetZReportComparisonAsync(userId); }
-            catch { /* email sending is best-effort; fall back to request totals */ }
+            catch { }
 
             var diff = comparison?.TotalDifference ?? Math.Abs(request.Difference);
 
+            ZReportComparisonResponse emailPayload;
+            if (comparison is not null)
+            {
+                emailPayload = comparison;
+            }
+            else
+            {
+                // Gmail unavailable — calculate UserTotal from the DB so it is never stored as 0
+                var summary        = await GetSummaryForDateAsync(userId, activeDate);
+                var fbStart        = activeDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var fbEnd          = fbStart.AddDays(1);
+                var fbInvoices     = await _db.SupplierInvoices
+                    .Where(i => i.CreatedAt >= fbStart && i.CreatedAt < fbEnd)
+                    .SumAsync(i => (decimal?)i.Value) ?? 0m;
+                var userManualCard  = summary.CreditCardEntries.Sum(e => e.ManualCardAmount);
+                var userCard        = summary.CreditCardEntries.Sum(e => e.CardAmount);
+                var calculatedTotal = userManualCard
+                                    + userCard
+                                    + summary.Cash
+                                    + summary.Cashback
+                                    + summary.PaypointPayout
+                                    + summary.InstantLotteryPayout
+                                    + summary.NewsVoucher
+                                    + summary.DDPoint
+                                    + summary.LotteryPayout
+                                    + summary.InstantLotteryTotalSales
+                                    + summary.LotteryValue
+                                    + summary.PaypointValue
+                                    + fbInvoices;
+
+                emailPayload = new ZReportComparisonResponse
+                {
+                    Date              = activeDate,
+                    UserTotal         = calculatedTotal,
+                    ZReportGrandTotal = request.ZReportTotal,
+                    TotalDifference   = diff,
+                    CanCommit         = diff <= 5m,
+                    Fields            = [],
+                };
+            }
+
             if (diff > 5.00m)
             {
-                // Send variance alert email then block commit
-                if (comparison is not null)
-                    _ = _email.SendComparisonEmailAsync(comparison, committed: false);
-
+                await _email.SendComparisonEmailAsync(emailPayload, committed: false);
                 throw new InvalidOperationException(
                     $"Cannot commit — difference of £{diff:F2} exceeds the £5.00 limit. A notification email has been sent.");
             }
@@ -347,9 +611,9 @@ namespace Sales.Services
             var commit = new SummaryCommit
             {
                 UserId       = userId,
-                Date         = today,
-                SummaryTotal = comparison?.UserTotal        ?? request.SummaryTotal,
-                ZReportTotal = comparison?.ZReportGrandTotal ?? request.ZReportTotal,
+                Date         = activeDate,
+                SummaryTotal = emailPayload.UserTotal,
+                ZReportTotal = emailPayload.ZReportGrandTotal,
                 Difference   = diff,
                 CommittedAt  = DateTime.UtcNow,
             };
@@ -357,9 +621,12 @@ namespace Sales.Services
             _db.SummaryCommits.Add(commit);
             await _db.SaveChangesAsync();
 
-            // Send committed-successfully email
-            if (comparison is not null)
-                _ = _email.SendComparisonEmailAsync(comparison, committed: true);
+            try { await _email.SendComparisonEmailAsync(emailPayload, committed: true); }
+            catch { /* email failure must not roll back a successful commit */ }
+
+            // After the commit the active date shifts forward — fetch the new date's summary
+            // so the frontend can immediately display the next day's (empty) dashboard.
+            var newSummary = await GetTodayAsync(userId);
 
             return new SummaryCommitResponse
             {
@@ -369,6 +636,7 @@ namespace Sales.Services
                 ZReportTotal = commit.ZReportTotal,
                 Difference   = commit.Difference,
                 CommittedAt  = commit.CommittedAt,
+                NewSummary   = newSummary,
             };
         }
     }

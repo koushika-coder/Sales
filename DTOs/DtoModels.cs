@@ -114,3 +114,20 @@ public class PaginatedResponse<T>
     public int PageNumber { get; set; }
     public int PageSize { get; set; }
 }
+
+public class ForgotPasswordRequest
+{
+    public string Email { get; set; } = string.Empty;
+}
+
+public class AdminResetUserPasswordRequest
+{
+    public string Email { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+public class AdminResetAdminPasswordRequest
+{
+    public int AdminId { get; set; }
+    public string NewPassword { get; set; } = string.Empty;
+}

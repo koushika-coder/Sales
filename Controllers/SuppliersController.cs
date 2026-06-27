@@ -28,20 +28,24 @@ namespace Sales.Controllers
             Ok(await _service.GetAllSuppliers());
 
         [HttpPost]
-        [Authorize(Roles = "admin")]
         public async Task<IActionResult> AddSupplier([FromBody] AddSupplierRequest request)
         {
+            if (User.FindFirst("role")?.Value != "admin")
+                return StatusCode(403, new { message = "Only admins can add suppliers." });
+
             if (string.IsNullOrWhiteSpace(request.Name))
-                return BadRequest("Supplier name is required.");
+                return BadRequest(new { message = "Supplier name is required." });
 
             await _service.AddSupplier(request);
             return Ok(new { message = "Supplier added successfully." });
         }
 
         [HttpDelete("{id}")]
-        [Authorize(Roles = "admin")]
         public async Task<IActionResult> DeleteSupplier(int id)
         {
+            if (User.FindFirst("role")?.Value != "admin")
+                return StatusCode(403, new { message = "Only admins can delete suppliers." });
+
             await _service.DeleteSupplier(id);
             return Ok(new { message = "Supplier deleted." });
         }
@@ -81,6 +85,27 @@ namespace Sales.Controllers
 
             await _service.DeleteInvoice(userId, id);
             return Ok(new { message = "Invoice deleted." });
+        }
+
+        // GET api/suppliers/invoices/dates
+        // Date-wise summary: date, count of invoices, total value — all users
+        [HttpGet("invoices/dates")]
+        public async Task<IActionResult> GetInvoiceDates() =>
+            Ok(await _service.GetInvoiceDatesAsync());
+
+        // GET api/suppliers/invoices/date/2026-06-12
+        // All invoices for a specific date across all users, with supplier and user names
+        [HttpGet("invoices/date/{date}")]
+        public async Task<IActionResult> GetInvoicesByDate(DateOnly date) =>
+            Ok(await _service.GetInvoicesByDateAsync(date));
+
+        // GET api/suppliers/invoices?date=2026-06-13
+        // Date-picker friendly: pass ?date= to filter; omit for today's invoices (all users)
+        [HttpGet("invoices")]
+        public async Task<IActionResult> GetInvoices([FromQuery] DateOnly? date)
+        {
+            var target = date ?? DateOnly.FromDateTime(DateTime.Today);
+            return Ok(await _service.GetInvoicesByDateAsync(target));
         }
     }
 }

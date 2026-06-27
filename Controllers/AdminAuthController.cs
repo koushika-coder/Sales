@@ -7,44 +7,66 @@ namespace Sales.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AdminAuthController : ControllerBase
+public class AdminAuthController(
+    IAdminService adminService,
+    IAuthService authService,
+    IConfiguration configuration,
+    IEmailService emailService) : ControllerBase
 {
-    private readonly IAdminService _adminService;
-    private readonly IAuthService _authService;
-    private readonly IConfiguration _configuration;
+    private readonly IAdminService _adminService = adminService;
+    private readonly IAuthService _authService = authService;
+    private readonly IConfiguration _configuration = configuration;
+    private readonly IEmailService _emailService = emailService;
 
-    public AdminAuthController(IAdminService adminService, IAuthService authService, IConfiguration configuration)
-    {
-        _adminService = adminService;
-        _authService = authService;
-        _configuration = configuration;
-    }
-
+    // Admin only — register a new admin
     [HttpPost("register")]
     public async Task<ActionResult<AdminAuthResponse>> Register(AdminRegisterRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.PasswordHash
-            ) || string.IsNullOrWhiteSpace(request.Name))
+        var role = User.FindFirst("role")?.Value;
+        if (role != "admin")
+            return StatusCode(403, new { message = "Only admins can register other admins." });
+
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.PasswordHash) || string.IsNullOrWhiteSpace(request.Name))
             return BadRequest(new { message = "Email, password, and name are required" });
 
         var admin = await _adminService.RegisterAsync(request, _authService);
         if (admin == null)
             return BadRequest(new { message = "Admin with this email already exists" });
 
-        var token = _authService.GenerateJwtToken(
-            new Admin 
-            { 
-                AdminId = admin.AdminId, 
-                Email = admin.Email, 
-                Name = admin.Name, 
-                Role = admin.Role 
-            },
-            _configuration["Jwt:Secret"] ?? string.Empty,
-            _configuration["Jwt:Issuer"] ?? string.Empty,
-            _configuration["Jwt:Audience"] ?? string.Empty
-        );
+        return Ok(new { message = "Admin registered successfully.", admin });
+    }
 
-        return Ok(new AdminAuthResponse { Token = token, Admin = admin });
+    // Public — admin submits email, receives a temp password by email
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return BadRequest(new { message = "Email is required." });
+
+        var (success, name, tempPassword, error) = await _adminService.ForgotPasswordAsync(request.Email, _authService);
+        if (!success)
+            return BadRequest(new { message = error });
+
+        await _emailService.SendPasswordResetEmailAsync(request.Email, name ?? "Admin", tempPassword!);
+
+        return Ok(new { message = "A temporary password has been sent to your email." });
+    }
+
+    // Admin only — reset any admin's password directly
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] AdminResetAdminPasswordRequest request)
+    {
+        if (HttpContext.Items["AdminId"] == null)
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+            return BadRequest(new { message = "New password is required." });
+
+        var (success, error) = await _adminService.AdminResetPasswordAsync(request.AdminId, request.NewPassword, _authService);
+        if (!success)
+            return BadRequest(new { message = error });
+
+        return Ok(new { message = "Admin password reset successfully." });
     }
 
     [HttpPost("login")]
@@ -132,9 +154,6 @@ public class AdminAuthController : ControllerBase
         if (adminIdObj == null)
             return Unauthorized(new { message = "Admin not authenticated" });
 
-        var currentAdminId = int.Parse(adminIdObj.ToString() ?? "0");
-
-        // Only allow admins to update admin profiles
         if (adminRoleObj?.ToString() != "admin")
             return Forbid();
 

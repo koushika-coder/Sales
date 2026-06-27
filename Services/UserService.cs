@@ -15,6 +15,8 @@ public interface IUserService
     Task<PaginatedResponse<UserDto>> GetAllUsersAsync(int pageNumber = 1, int pageSize = 10);
     Task<UserDto?> UpdateUserAsync(int userId, string? name, string? department);
     Task<bool> DeleteUserAsync(int userId);
+    Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
+    Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService);
 }
 
 public class UserService : IUserService
@@ -142,6 +144,33 @@ public class UserService : IUserService
         await _context.SaveChangesAsync();
 
         return true;
+    }
+
+    public async Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email && u.IsActive);
+        if (user == null)
+            return (false, null, null, "No active account found with that email.");
+
+        var tempPassword = Guid.NewGuid().ToString("N")[..8];
+        user.PasswordHash = authService.HashPassword(tempPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return (true, user.Name, tempPassword, null);
+    }
+
+    public async Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+        if (user == null)
+            return (false, "No user found with that email address.");
+
+        user.PasswordHash = authService.HashPassword(newPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return (true, null);
     }
 
     private static UserDto MapToUserDto(User user)

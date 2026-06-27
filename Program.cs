@@ -26,6 +26,7 @@ var jwtAudience = builder.Configuration["Jwt:Audience"] ?? string.Empty;
 builder.Services.AddAuthentication("Bearer")
     .AddJwtBearer(options =>
     {
+        options.MapInboundClaims = false; // keep original claim names from the token
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -76,6 +77,8 @@ builder.Services.AddScoped<ICreditCardService, CreditCardBankingService>();
 builder.Services.AddScoped<IGmailService,GmailServiceImpl>();
 builder.Services.AddScoped<ISummaryService, SummaryService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IAdminReconciliationService, AdminReconciliationService>();
+builder.Services.AddScoped<IReportService, ReportService>();
 
 
 // HTTP Client Factory for Google OAuth
