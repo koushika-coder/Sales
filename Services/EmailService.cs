@@ -10,6 +10,8 @@ namespace Sales.Services
         Task SendComparisonEmailAsync(ZReportComparisonResponse comparison, bool committed);
         Task SendPasswordResetEmailAsync(string toEmail, string name, string tempPassword);
         Task SendReconciliationSubmittedEmailAsync(AdminSubmitReconciliationRequest data, DateOnly date);
+        Task SendStaffLockedOutToAdminsAsync(string staffName, string staffEmail, IEnumerable<(string Email, string Name)> adminRecipients);
+        Task SendAdminLockedOutSelfAsync(string adminEmail, string adminName, string tempPassword);
     }
 
     public class EmailService : IEmailService
@@ -140,6 +142,95 @@ namespace Sales.Services
                 """;
 
             using var message = new MailMessage(sender, recipient, subject, body) { IsBodyHtml = true };
+            using var client  = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+            };
+            await client.SendMailAsync(message);
+        }
+
+        public async Task SendStaffLockedOutToAdminsAsync(
+            string staffName,
+            string staffEmail,
+            IEnumerable<(string Email, string Name)> adminRecipients)
+        {
+            var host     = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port     = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender   = _config["Email:SenderEmail"]    ?? "";
+            var password = _config["Email:SenderPassword"] ?? "";
+
+            var subject = $"⚠️ Login Alert — {staffName}'s Account Locked After 5 Failed Attempts";
+            var body = $"""
+                <html><body style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;'>
+                <div style='background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:20px 24px;'>
+                  <h2 style='margin:0 0 8px;color:#dc2626;'>⚠️ Account Locked</h2>
+                  <p style='margin:0;color:#374151;'>
+                    Staff member <strong>{staffName}</strong> (<a href='mailto:{staffEmail}'>{staffEmail}</a>)
+                    has made <strong>5 consecutive failed login attempts</strong>.
+                  </p>
+                </div>
+                <p style='color:#374151;margin-top:16px;'>
+                  Please log in to the <strong>Admin Panel</strong> and reset this user's password
+                  so they can regain access.
+                </p>
+                <p style='color:#6b7280;font-size:0.85rem;'>
+                  If you believe this was an unauthorised attempt, you may also wish to contact the user directly.
+                </p>
+                </body></html>
+                """;
+
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+            };
+
+            foreach (var (email, _) in adminRecipients)
+            {
+                if (string.IsNullOrWhiteSpace(email)) continue;
+                using var msg = new MailMessage(sender, email, subject, body) { IsBodyHtml = true };
+                await client.SendMailAsync(msg);
+            }
+        }
+
+        public async Task SendAdminLockedOutSelfAsync(string adminEmail, string adminName, string tempPassword)
+        {
+            var host     = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port     = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender   = _config["Email:SenderEmail"]    ?? "";
+            var password = _config["Email:SenderPassword"] ?? "";
+
+            if (string.IsNullOrWhiteSpace(adminEmail)) return;
+
+            var subject = "🔒 Your Admin Account — Temporary Password (5 Failed Logins)";
+            var body = $"""
+                <html><body style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;'>
+                <div style='background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:20px 24px;'>
+                  <h2 style='margin:0 0 8px;color:#dc2626;'>🔒 Account Locked</h2>
+                  <p style='margin:0;color:#374151;'>
+                    Hi <strong>{adminName}</strong>, your admin account has been locked after
+                    <strong>5 consecutive failed login attempts</strong>.
+                  </p>
+                </div>
+                <p style='color:#374151;margin-top:16px;'>
+                  A new temporary password has been generated for your account:
+                </p>
+                <p style='font-size:22px;font-weight:bold;letter-spacing:3px;padding:14px 22px;
+                          background:#f3f4f6;display:inline-block;border-radius:8px;
+                          border:1px solid #d1d5db;color:#111827;'>
+                  {tempPassword}
+                </p>
+                <p style='color:#374151;'>
+                  Please log in with this temporary password and change it immediately from your account settings.
+                </p>
+                <p style='color:#6b7280;font-size:0.85rem;'>
+                  If you did not initiate these login attempts, please contact your system administrator immediately.
+                </p>
+                </body></html>
+                """;
+
+            using var message = new MailMessage(sender, adminEmail, subject, body) { IsBodyHtml = true };
             using var client  = new SmtpClient(host, port)
             {
                 Credentials = new NetworkCredential(sender, password),

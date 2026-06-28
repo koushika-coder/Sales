@@ -12,13 +12,20 @@ public class AuthController : ControllerBase
     private readonly IAuthService _authService;
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
+    private readonly ILoginAttemptTracker _attemptTracker;
 
-    public AuthController(IUserService userService, IAuthService authService, IConfiguration configuration, IEmailService emailService)
+    public AuthController(
+        IUserService userService,
+        IAuthService authService,
+        IConfiguration configuration,
+        IEmailService emailService,
+        ILoginAttemptTracker attemptTracker)
     {
-        _userService  = userService;
-        _authService  = authService;
-        _configuration = configuration;
-        _emailService  = emailService;
+        _userService     = userService;
+        _authService     = authService;
+        _configuration   = configuration;
+        _emailService    = emailService;
+        _attemptTracker  = attemptTracker;
     }
 
     // Admin only — register a new user
@@ -47,7 +54,35 @@ public class AuthController : ControllerBase
 
         var (user, error) = await _userService.LoginAsync(request, _authService);
         if (user == null)
-            return Unauthorized(new { message = error });
+        {
+            var attempts          = _attemptTracker.Increment(request.Email);
+            var attemptsRemaining = Math.Max(0, 5 - attempts);
+
+            if (attempts >= 5 && !_attemptTracker.HasBeenNotified(request.Email))
+            {
+                _attemptTracker.MarkNotified(request.Email);
+
+                var failedUser = await _userService.GetUserByEmailAsync(request.Email);
+                if (failedUser != null)
+                {
+                    if (failedUser.Role == "admin")
+                    {
+                        var (ok, _, tempPwd, _) = await _userService.ForgotPasswordAsync(failedUser.Email, _authService);
+                        if (ok)
+                            _ = _emailService.SendAdminLockedOutSelfAsync(failedUser.Email, failedUser.Name, tempPwd!);
+                    }
+                    else
+                    {
+                        var admins = await _userService.GetAllAdminEmailsAsync();
+                        _ = _emailService.SendStaffLockedOutToAdminsAsync(failedUser.Name, failedUser.Email, admins);
+                    }
+                }
+            }
+
+            return Unauthorized(new { message = error, attemptsRemaining });
+        }
+
+        _attemptTracker.Reset(request.Email);
 
         var token = _authService.GenerateJwtToken(
             new Sales.Models.User

@@ -17,6 +17,8 @@ public interface IUserService
     Task<bool> DeleteUserAsync(int userId);
     Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
     Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService);
+    Task<UserDto?> GetUserByEmailAsync(string email);
+    Task<List<(string Email, string Name)>> GetAllAdminEmailsAsync();
 }
 
 public class UserService : IUserService
@@ -171,6 +173,21 @@ public class UserService : IUserService
         await _context.SaveChangesAsync();
 
         return (true, null);
+    }
+
+    public async Task<UserDto?> GetUserByEmailAsync(string email)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email && u.IsActive);
+        return user != null ? MapToUserDto(user) : null;
+    }
+
+    public async Task<List<(string Email, string Name)>> GetAllAdminEmailsAsync()
+    {
+        var rows = await _context.Users
+            .Where(u => u.Role == "admin" && u.IsActive)
+            .Select(u => new { u.Email, u.Name })
+            .ToListAsync();
+        return rows.Select(r => (r.Email, r.Name)).ToList();
     }
 
     private static UserDto MapToUserDto(User user)

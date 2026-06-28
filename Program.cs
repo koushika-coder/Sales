@@ -79,6 +79,7 @@ builder.Services.AddScoped<ISummaryService, SummaryService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAdminReconciliationService, AdminReconciliationService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddSingleton<ILoginAttemptTracker, LoginAttemptTracker>();
 
 
 // HTTP Client Factory for Google OAuth
