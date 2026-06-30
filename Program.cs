@@ -122,7 +122,30 @@ var app = builder.Build();
 // Apply pending EF Core migrations on startup
 using (var scope = app.Services.CreateScope())
 {
-    scope.ServiceProvider.GetRequiredService<SalesDbContext>().Database.Migrate();
+    var db          = scope.ServiceProvider.GetRequiredService<SalesDbContext>();
+    var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+
+    db.Database.Migrate();
+
+    // Seed the first admin user if none exists.
+    // Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD as env vars in Render
+    // (remove them after first successful login).
+    var seedEmail    = builder.Configuration["SEED_ADMIN_EMAIL"];
+    var seedPassword = builder.Configuration["SEED_ADMIN_PASSWORD"];
+    if (!string.IsNullOrWhiteSpace(seedEmail) && !string.IsNullOrWhiteSpace(seedPassword)
+        && !db.Users.Any(u => u.Role == "admin"))
+    {
+        db.Users.Add(new Sales.Models.User
+        {
+            Email        = seedEmail,
+            PasswordHash = authService.HashPassword(seedPassword),
+            Name         = "Admin",
+            Role         = "admin",
+            IsActive     = true,
+            CreatedAt    = DateTime.UtcNow,
+        });
+        db.SaveChanges();
+    }
 }
 
 // Render (and most PaaS hosts) terminate TLS at the edge and forward plain HTTP —
