@@ -64,13 +64,20 @@ namespace Sales.Services
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
 
-            // Fallback: if no record for the active date, use the most recent uncommitted one.
+            // Fallback: show most recent record only if its date is not yet committed.
             if (record == null)
             {
-                record = await _db.Deductions
+                var prev = await _db.Deductions
                     .Where(d => d.UserId == userId && d.CreatedAt < start)
                     .OrderByDescending(d => d.CreatedAt)
                     .FirstOrDefaultAsync();
+
+                if (prev != null)
+                {
+                    var prevDate = DateOnly.FromDateTime(prev.CreatedAt);
+                    if (!await IsDateCommittedAsync(userId, prevDate))
+                        record = prev;
+                }
             }
 
             if (record == null) return null;

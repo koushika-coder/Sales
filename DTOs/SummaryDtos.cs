@@ -212,6 +212,10 @@ namespace Sales.DTOs
         // Commit status
         public bool IsCommitted { get; set; }
         public DateTime? CommittedAt { get; set; }
+
+        // True when at least one record exists for the active date (or an uncommitted fallback).
+        // False means the active date is fresh — no data entered yet.
+        public bool HasTodayData { get; set; }
     }
 
     public class SummaryCommitRequest

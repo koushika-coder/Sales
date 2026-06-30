@@ -109,7 +109,6 @@ namespace Sales.Services
 
             if (instantLotteryTotalCount == 0 && instantLotteryTotalSales == 0m)
             {
-                // Find the most recent inventory date before today that is not committed.
                 var latestInventoryTs = await _db.LotteryInventory
                     .Where(li => li.UserId == userId && li.InventoryDate < start)
                     .MaxAsync(li => (DateTime?)li.InventoryDate);
@@ -117,9 +116,7 @@ namespace Sales.Services
                 if (latestInventoryTs.HasValue)
                 {
                     var latestDate = DateOnly.FromDateTime(latestInventoryTs.Value);
-                    var latestCommitted =
-                        await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == latestDate) ||
-                        await _db.AdminReconciliations.AnyAsync(r => r.Date == latestDate && r.Status == "submitted");
+                    var latestCommitted = await IsDateCommittedAsync(userId, latestDate);
 
                     if (!latestCommitted)
                     {
@@ -139,10 +136,15 @@ namespace Sales.Services
                 .OrderByDescending(l => l.CreatedDate)
                 .FirstOrDefaultAsync();
 
-            lottery ??= await _db.Lotteries
-                .Where(l => l.UserId == userId && l.CreatedDate < start)
-                .OrderByDescending(l => l.CreatedDate)
-                .FirstOrDefaultAsync();
+            if (lottery == null)
+            {
+                var prevLottery = await _db.Lotteries
+                    .Where(l => l.UserId == userId && l.CreatedDate < start)
+                    .OrderByDescending(l => l.CreatedDate)
+                    .FirstOrDefaultAsync();
+                if (prevLottery != null && !await IsDateCommittedAsync(userId, DateOnly.FromDateTime(prevLottery.CreatedDate)))
+                    lottery = prevLottery;
+            }
 
             // Paypoint value: active date first, then most recent uncommitted record.
             var paypoint = await _db.Paypoints
@@ -152,13 +154,28 @@ namespace Sales.Services
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
 
-            paypoint ??= await _db.Paypoints
-                .Where(p => p.UserId == userId && p.CreatedDate < start)
-                .OrderByDescending(p => p.CreatedDate)
-                .FirstOrDefaultAsync();
+            if (paypoint == null)
+            {
+                var prevPaypoint = await _db.Paypoints
+                    .Where(p => p.UserId == userId && p.CreatedDate < start)
+                    .OrderByDescending(p => p.CreatedDate)
+                    .FirstOrDefaultAsync();
+                if (prevPaypoint != null && !await IsDateCommittedAsync(userId, DateOnly.FromDateTime(prevPaypoint.CreatedDate)))
+                    paypoint = prevPaypoint;
+            }
 
             var commit = await _db.SummaryCommits
                 .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == date);
+
+            var hasInventoryToday = await _db.LotteryInventory
+                .AnyAsync(li => li.UserId == userId && li.InventoryDate >= start && li.InventoryDate < end);
+
+            var hasTodayData = deduction != null
+                || safeDrop != null
+                || creditCardEntries.Any()
+                || hasInventoryToday
+                || lottery != null
+                || paypoint != null;
 
             var lastSafe    = safeDrop?.LastSafe      ?? 0m;
             var closeAmount = safeDrop?.SafeDropAmount ?? 0m;
@@ -182,6 +199,7 @@ namespace Sales.Services
                 PaypointValue = paypoint?.PaypointValue ?? 0m,
                 IsCommitted = commit is not null,
                 CommittedAt = commit?.CommittedAt,
+                HasTodayData = hasTodayData,
             };
         }
 
@@ -603,6 +621,7 @@ namespace Sales.Services
 
             if (diff > 5.00m)
             {
+                await SaveFailedCommitAsPendingAsync(userId, activeDate, emailPayload, diff);
                 await _email.SendComparisonEmailAsync(emailPayload, committed: false);
                 throw new InvalidOperationException(
                     $"Cannot commit — difference of £{diff:F2} exceeds the £5.00 limit. A notification email has been sent.");
@@ -638,6 +657,43 @@ namespace Sales.Services
                 CommittedAt  = commit.CommittedAt,
                 NewSummary   = newSummary,
             };
+        }
+
+        // A commit attempt that exceeds the £5.00 limit is recorded immediately as a
+        // "pending" AdminReconciliation row so it shows up for admin review right away,
+        // instead of waiting for the date-scan loop to pick it up the next day.
+        private async Task SaveFailedCommitAsPendingAsync(
+            int userId, DateOnly activeDate, ZReportComparisonResponse emailPayload, decimal diff)
+        {
+            var summary = await GetSummaryForDateAsync(userId, activeDate);
+
+            var existing = await _db.AdminReconciliations
+                .FirstOrDefaultAsync(r => r.Date == activeDate && r.Status == "pending");
+
+            var row = existing ?? new AdminReconciliation { Date = activeDate, CreatedAt = DateTime.UtcNow };
+            if (existing is null) _db.AdminReconciliations.Add(row);
+
+            row.ManualCardAmount         = summary.CreditCardEntries.Sum(e => e.ManualCardAmount);
+            row.CardAmount               = summary.CreditCardEntries.Sum(e => e.CardAmount);
+            row.LastSafe                 = summary.LastSafe;
+            row.SafeDropAmount           = summary.SafeDropAmount;
+            row.Cashback                 = summary.Cashback;
+            row.PaypointPayout           = summary.PaypointPayout;
+            row.InstantLotteryPayout     = summary.InstantLotteryPayout;
+            row.NewsVoucher              = summary.NewsVoucher;
+            row.DDPoint                  = summary.DDPoint;
+            row.LotteryPayout            = summary.LotteryPayout;
+            row.InstantLotteryTotalCount = summary.InstantLotteryTotalCount;
+            row.InstantLotteryTotalSales = summary.InstantLotteryTotalSales;
+            row.LotteryValue             = summary.LotteryValue;
+            row.PaypointValue            = summary.PaypointValue;
+            row.SummaryTotal             = emailPayload.UserTotal;
+            row.ZReportTotal             = emailPayload.ZReportGrandTotal;
+            row.Difference               = diff;
+            row.Status                   = "pending";
+            row.UpdatedAt                = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
         }
     }
 }

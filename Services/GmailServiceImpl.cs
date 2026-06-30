@@ -295,12 +295,70 @@ namespace Sales.Services
 
             return string.Empty;
         }
+
+        public async Task<decimal?> GetZReportTotalForDateAsync(DateOnly date)
+        {
+            try
+            {
+                var emails = await GetEmailsAsync(new GmailRequest { SubjectKeyword = "Z-Report", MaxResults = 50 });
+
+                var zEmail = emails.FirstOrDefault(e =>
+                    !e.Body.TrimStart().StartsWith('<') &&
+                    e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase) &&
+                    ParseEmailDate(e.Date) == date);
+
+                if (zEmail is null) return null;
+
+                var z = ParseZReportBody(zEmail.Body);
+                if (z.TryGetValue("DEPARTMENT TOTAL", out var dt)) return dt;
+                if (z.TryGetValue("DEPT TOTAL",       out var dt2)) return dt2;
+                if (z.TryGetValue("GRAND TOTAL",      out var gt)) return gt;
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static DateOnly? ParseEmailDate(string emailDate)
+        {
+            if (string.IsNullOrWhiteSpace(emailDate)) return null;
+            if (DateTimeOffset.TryParse(emailDate,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var dto))
+                return DateOnly.FromDateTime(dto.DateTime);
+            return null;
+        }
+
+        private static Dictionary<string, decimal> ParseZReportBody(string body)
+        {
+            var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawLine in body.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r').Trim();
+                while (line.StartsWith('>')) line = line.TrimStart('>').TrimStart();
+                var lastSpace = line.LastIndexOf(' ');
+                if (lastSpace < 0) continue;
+                var label    = line[..lastSpace].TrimEnd();
+                var valueStr = line[(lastSpace + 1)..].Trim()
+                    .Replace(",", "").Replace("£", "").Replace("$", "");
+                if (!string.IsNullOrEmpty(label) &&
+                    decimal.TryParse(valueStr,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var val))
+                    result[label] = val;
+            }
+            return result;
+        }
     }
 
     public interface IGmailService
     {
-        Task<List<GmailMessageResponse>> GetEmailsAsync(
-            GmailRequest request);
+        Task<List<GmailMessageResponse>> GetEmailsAsync(GmailRequest request);
 
+        // Returns the DEPARTMENT TOTAL (or GRAND TOTAL) from the Z-report email for the given date.
+        // Returns null if no matching email is found.
+        Task<decimal?> GetZReportTotalForDateAsync(DateOnly date);
     }
 }

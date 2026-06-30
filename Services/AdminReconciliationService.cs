@@ -27,11 +27,13 @@ namespace Sales.Services
     {
         private readonly SalesDbContext _db;
         private readonly IEmailService _email;
+        private readonly IGmailService _gmail;
 
-        public AdminReconciliationService(SalesDbContext db, IEmailService email)
+        public AdminReconciliationService(SalesDbContext db, IEmailService email, IGmailService gmail)
         {
-            _db = db;
+            _db    = db;
             _email = email;
+            _gmail = gmail;
         }
 
         // ── Pending: all un-committed days (up to 30 days back) ─────────────
@@ -56,12 +58,54 @@ namespace Sales.Services
                 .ToHashSet();
 
             var result = new List<PendingReconciliationResponse>();
+            var includedDates = new HashSet<DateOnly>();
 
-            // Start from yesterday — today is still in progress for staff
+            // Dates with a failed commit attempt (difference > £5.00) are recorded as
+            // "pending" rows the moment staff tries to commit, so they surface immediately —
+            // even for today's active date, not just yesterday-and-earlier.
+            var failedAttempts = await _db.AdminReconciliations
+                .Where(r => r.Status == "pending" && r.Date >= lookbackStart && r.Date <= today)
+                .OrderByDescending(r => r.Date)
+                .ToListAsync();
+
+            foreach (var r in failedAttempts)
+            {
+                if (committedDates.Contains(r.Date) || adminReconciledDates.Contains(r.Date)) continue;
+
+                result.Add(new PendingReconciliationResponse
+                {
+                    HasPending = true,
+                    Id = r.Id,
+                    Date = r.Date,
+                    ManualCardAmount = r.ManualCardAmount,
+                    CardAmount = r.CardAmount,
+                    LastSafe = r.LastSafe,
+                    SafeDropAmount = r.SafeDropAmount,
+                    Cashback = r.Cashback,
+                    PaypointPayout = r.PaypointPayout,
+                    InstantLotteryPayout = r.InstantLotteryPayout,
+                    NewsVoucher = r.NewsVoucher,
+                    DDPoint = r.DDPoint,
+                    LotteryPayout = r.LotteryPayout,
+                    InstantLotteryTotalCount = r.InstantLotteryTotalCount,
+                    InstantLotteryTotalSales = r.InstantLotteryTotalSales,
+                    LotteryValue = r.LotteryValue,
+                    PaypointValue = r.PaypointValue,
+                    SummaryTotal = r.SummaryTotal,
+                    ZReportTotal = r.ZReportTotal,
+                    Difference = r.Difference,
+                    CreatedAt = r.CreatedAt,
+                });
+                includedDates.Add(r.Date);
+            }
+
+            // Start from yesterday — today is still in progress for staff (unless a failed
+            // commit attempt already surfaced it above).
             for (var date = yesterday; date >= lookbackStart; date = date.AddDays(-1))
             {
                 if (committedDates.Contains(date)) continue;
                 if (adminReconciledDates.Contains(date)) continue;
+                if (includedDates.Contains(date)) continue;
 
                 var rangeStart = date.ToDateTime(TimeOnly.MinValue);
                 var rangeEnd   = rangeStart.AddDays(1);
@@ -79,7 +123,7 @@ namespace Sales.Services
                 result.Add(await BuildPendingItemAsync(date, rangeStart, rangeEnd));
             }
 
-            return result;
+            return result.OrderByDescending(x => x.Date).ToList();
         }
 
         private async Task<PendingReconciliationResponse> BuildPendingItemAsync(
@@ -126,6 +170,7 @@ namespace Sales.Services
 
             var cash         = lastSafe + safeDropAmount;
             var summaryTotal = manualCard + cardAmount + cash;
+            var zReportTotal = await _gmail.GetZReportTotalForDateAsync(date) ?? 0m;
 
             return new PendingReconciliationResponse
             {
@@ -147,8 +192,8 @@ namespace Sales.Services
                 LotteryValue = lottery?.LotteryValue ?? 0m,
                 PaypointValue = paypoint?.PaypointValue ?? 0m,
                 SummaryTotal = summaryTotal,
-                ZReportTotal = 0m,   // requires Z-report email — admin fills this in on submit
-                Difference = 0m,     // calculated by admin on submit
+                ZReportTotal = zReportTotal,
+                Difference = Math.Abs(summaryTotal - zReportTotal),
                 CreatedAt = rangeStart,
             };
         }

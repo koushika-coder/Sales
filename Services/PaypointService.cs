@@ -97,11 +97,17 @@ namespace Sales.Services
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
 
-            // Fallback: most recent record before the active date.
-            return record ?? await _context.Paypoints
+            // Fallback: most recent record before the active date, only if not yet committed.
+            if (record != null) return record;
+
+            var prev = await _context.Paypoints
                 .Where(x => x.UserId == userId && x.CreatedDate < start)
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
+
+            if (prev == null) return null;
+            var prevDate = DateOnly.FromDateTime(prev.CreatedDate);
+            return await IsDateCommittedAsync(userId, prevDate) ? null : prev;
         }
         public async Task<Paypoint> UpdateAsync(int userId, int id,PaypointRequest request)
         {
