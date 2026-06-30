@@ -1,20 +1,27 @@
+databases:
+  - name: sales-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+
 services:
   - type: web
     name: sales-api
     runtime: docker
-    plan: starter
+    plan: free
     region: oregon
-    branch: main
+    branch: sales_complted
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
 
-      # External SQL Server — Render has no managed SQL Server, point this at
-      # Azure SQL / AWS RDS for SQL Server / another reachable instance.
+      # Render-managed free PostgreSQL — connection string supplied automatically.
       - key: ConnectionStrings__DefaultConnection
-        sync: false
+        fromDatabase:
+          name: sales-db
+          property: connectionString
 
       - key: Jwt__Secret
         generateValue: true
