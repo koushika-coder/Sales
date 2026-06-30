@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using Sales.Data;
 using Sales.Middleware;
 using Sales.Services;
@@ -15,8 +16,34 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 // Database
+// Render (and Heroku-style platforms) hand out connection strings as a
+// postgres:// URI, but Npgsql's connection string parser only understands
+// the ADO.NET Key=Value;Key=Value format — convert if needed.
+static string ToNpgsqlConnectionString(string raw)
+{
+    if (!raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
+        !raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        return raw;
+
+    var uri = new Uri(raw);
+    var userInfo = uri.UserInfo.Split(':', 2);
+
+    return new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        Username = Uri.UnescapeDataString(userInfo[0]),
+        Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "",
+        SslMode = SslMode.Prefer,
+    }.ConnectionString;
+}
+
+var dbConnectionString = ToNpgsqlConnectionString(
+    builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty);
+
 builder.Services.AddDbContext<SalesDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
+    options.UseNpgsql(dbConnectionString)
 );
 
 // JWT Configuration
