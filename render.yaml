@@ -17,8 +17,9 @@ services:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
 
-      - key: ConnectionStrings__DefaultConnection
-        value: postgresql://sales_db_kdnh_user:hOUAwNEWakCEjnxJqit58YdqJbTlB9O0@dpg-d9216lbtqb8s73b68cig-a/sales_db_kdnh
+      # ConnectionStrings__DefaultConnection is intentionally not set here —
+      # Render wasn't applying it to this service for unknown reasons, so the
+      # real value lives directly in appsettings.json instead.
 
       - key: Jwt__Secret
         generateValue: true
@@ -49,9 +50,3 @@ services:
       # Vite app's URL — set once that's deployed.
       - key: Cors__AllowedOrigins
         sync: false
-
-      # TEMPORARY — remove after first successful login
-      - key: SEED_ADMIN_EMAIL
-        value: koushikaonline13062002@gmail.com
-      - key: SEED_ADMIN_PASSWORD
-        value: Admin@1234
