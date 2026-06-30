@@ -52,3 +52,9 @@ services:
       # Vite app's URL — set once that's deployed.
       - key: Cors__AllowedOrigins
         sync: false
+
+      # TEMPORARY — remove after first successful login
+      - key: SEED_ADMIN_EMAIL
+        value: koushikaonline13062002@gmail.com
+      - key: SEED_ADMIN_PASSWORD
+        value: Admin@1234
