@@ -272,11 +272,11 @@ public class SalesDbContext : DbContext
             entity.HasKey(e => e.Id);
 
             entity.Property(e => e.LastSafe)
-                  .HasColumnType("decimal(18,2)")
+                  .HasPrecision(18, 2)
                   .IsRequired();
 
             entity.Property(e => e.SafeDropAmount)
-                  .HasColumnType("decimal(18,2)")
+                  .HasPrecision(18, 2)
                   .IsRequired();
 
             // Cash is computed — do NOT map it to a column
