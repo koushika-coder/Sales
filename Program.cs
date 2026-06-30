@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Sales.Data;
@@ -91,6 +92,19 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Apply pending EF Core migrations on startup
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<SalesDbContext>().Database.Migrate();
+}
+
+// Render (and most PaaS hosts) terminate TLS at the edge and forward plain HTTP —
+// trust those headers so the app knows the original request was HTTPS.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
 // Middleware
 app.UseErrorHandlingMiddleware();
 app.UseMiddleware<JwtAuthenticationMiddleware>();
@@ -100,9 +114,10 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
 
-app.UseHttpsRedirection();
+app.MapGet("/health", () => Results.Ok("OK"));
 
 app.UseCors("AllowSpecificOrigins");
 

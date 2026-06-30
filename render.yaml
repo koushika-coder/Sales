@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: sales-api
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+
+      # External SQL Server — Render has no managed SQL Server, point this at
+      # Azure SQL / AWS RDS for SQL Server / another reachable instance.
+      - key: ConnectionStrings__DefaultConnection
+        sync: false
+
+      - key: Jwt__Secret
+        generateValue: true
+      - key: Jwt__Issuer
+        value: SalesReconciliationApp
+      - key: Jwt__Audience
+        value: SalesReconciliationClient
+      - key: Jwt__ExpirationMinutes
+        value: "1440"
+
+      - key: GoogleOAuth__ClientId
+        sync: false
+      - key: GoogleOAuth__ClientSecret
+        sync: false
+
+      - key: Email__SmtpHost
+        value: smtp.gmail.com
+      - key: Email__SmtpPort
+        value: "587"
+      - key: Email__SenderEmail
+        sync: false
+      - key: Email__SenderPassword
+        sync: false
+      - key: Email__RecipientEmail
+        sync: false
+
+      # Comma-separated list of allowed frontend origins, e.g. your deployed
+      # Vite app's URL — set once that's deployed.
+      - key: Cors__AllowedOrigins
+        sync: false
