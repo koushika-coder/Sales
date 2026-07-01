@@ -46,7 +46,6 @@ services:
       - key: Email__RecipientEmail
         sync: false
 
-      # Comma-separated list of allowed frontend origins, e.g. your deployed
-      # Vite app's URL — set once that's deployed.
-      - key: Cors__AllowedOrigins
-        sync: false
+      # Cors__AllowedOrigins is intentionally not set here — same reason as
+      # the DB connection string above. The real value lives in
+      # appsettings.json under Cors:AllowedOrigins.
