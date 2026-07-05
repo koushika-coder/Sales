@@ -130,7 +130,7 @@ namespace Sales.Services
 
         public async Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByDateAsync(DateOnly date)
         {
-            var start = date.ToDateTime(TimeOnly.MinValue);
+            var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var end   = start.AddDays(1);
 
             var invoices = await _db.SupplierInvoices

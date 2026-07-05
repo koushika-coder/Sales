@@ -107,7 +107,7 @@ namespace Sales.Services
                 if (adminReconciledDates.Contains(date)) continue;
                 if (includedDates.Contains(date)) continue;
 
-                var rangeStart = date.ToDateTime(TimeOnly.MinValue);
+                var rangeStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
                 var rangeEnd   = rangeStart.AddDays(1);
 
                 // Only include this date if at least one piece of data was entered
@@ -349,7 +349,7 @@ namespace Sales.Services
             var adminPatch = await _db.AdminReconciliations
                 .FirstOrDefaultAsync(r => r.Date == date && r.Status == "submitted");
 
-            var rangeStart = date.ToDateTime(TimeOnly.MinValue);
+            var rangeStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var rangeEnd   = rangeStart.AddDays(1);
 
             var manualCard = await _db.CreditCardBanking
