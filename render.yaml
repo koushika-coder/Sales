@@ -35,13 +35,12 @@ services:
       - key: GoogleOAuth__ClientSecret
         sync: false
 
-      - key: Email__SmtpHost
-        value: smtp.gmail.com
-      - key: Email__SmtpPort
-        value: "587"
-      - key: Email__SenderEmail
+      # Email now goes out via the Resend HTTP API, not SMTP — Render blocks/hangs on
+      # outbound SMTP (confirmed: the same Gmail app password worked instantly locally
+      # but hung 130+ seconds from Render), so raw SmtpClient never worked reliably here.
+      - key: Resend__ApiKey
         sync: false
-      - key: Email__SenderPassword
+      - key: Resend__FromAddress
         sync: false
       - key: Email__RecipientEmail
         sync: false
