@@ -48,6 +48,7 @@ namespace Sales.Services
             {
                 Credentials = new NetworkCredential(sender, password),
                 EnableSsl    = true,
+                Timeout      = 10000,
             };
 
             await client.SendMailAsync(message);
@@ -78,6 +79,7 @@ namespace Sales.Services
             {
                 Credentials = new NetworkCredential(sender, password),
                 EnableSsl   = true,
+                Timeout     = 10000,
             };
             await client.SendMailAsync(message);
         }
@@ -146,6 +148,7 @@ namespace Sales.Services
             {
                 Credentials = new NetworkCredential(sender, password),
                 EnableSsl   = true,
+                Timeout     = 10000,
             };
             await client.SendMailAsync(message);
         }
@@ -184,6 +187,7 @@ namespace Sales.Services
             {
                 Credentials = new NetworkCredential(sender, password),
                 EnableSsl   = true,
+                Timeout     = 10000,
             };
 
             foreach (var (email, _) in adminRecipients)
@@ -235,6 +239,7 @@ namespace Sales.Services
             {
                 Credentials = new NetworkCredential(sender, password),
                 EnableSsl   = true,
+                Timeout     = 10000,
             };
             await client.SendMailAsync(message);
         }

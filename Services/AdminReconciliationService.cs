@@ -237,7 +237,8 @@ namespace Sales.Services
 
             await _db.SaveChangesAsync();
 
-            await _email.SendReconciliationSubmittedEmailAsync(request, existing.Date);
+            try { await _email.SendReconciliationSubmittedEmailAsync(request, existing.Date); }
+            catch { /* email failure must not block a successful submit — data is already saved */ }
 
             return new PendingReconciliationResponse
             {

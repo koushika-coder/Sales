@@ -125,7 +125,10 @@ public class AuthController : ControllerBase
         if (!success)
             return BadRequest(new { message = error });
 
-        await _emailService.SendPasswordResetEmailAsync(request.Email, name ?? "User", tempPassword!);
+        // Password is already changed at this point — an email failure must not turn into an
+        // unhandled 500, since the request already did what it promised on the server side.
+        try { await _emailService.SendPasswordResetEmailAsync(request.Email, name ?? "User", tempPassword!); }
+        catch { return StatusCode(502, new { message = "Password was reset, but the notification email failed to send. Contact an admin for your temporary password." }); }
 
         return Ok(new { message = "A temporary password has been sent to your email." });
     }
