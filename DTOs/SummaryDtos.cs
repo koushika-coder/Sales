@@ -259,6 +259,7 @@ namespace Sales.DTOs
     public class ZReportEmailResult
     {
         public bool IsCommitted { get; set; }
+        public bool IsPendingAdminReview { get; set; }
         public DateOnly TargetDate { get; set; }
         public string? Message { get; set; }
         public GmailMessageResponse? Email { get; set; }

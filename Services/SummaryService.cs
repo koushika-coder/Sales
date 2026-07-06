@@ -50,19 +50,21 @@ namespace Sales.Services
             var today     = DateOnly.FromDateTime(DateTime.UtcNow);
             var yesterday = today.AddDays(-1);
 
+            // "Committed" is a shop-wide, date-level fact — whichever staff member commits a
+            // day finalises it for everyone, so this must not be scoped to the current user.
             var todayCommitted =
-                await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == today) ||
+                await _db.SummaryCommits.AnyAsync(c => c.Date == today) ||
                 await _db.AdminReconciliations.AnyAsync(r => r.Date == today && r.Status == "submitted");
             if (todayCommitted) return today.AddDays(1);
 
             var yesterdayCommitted =
-                await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == yesterday) ||
+                await _db.SummaryCommits.AnyAsync(c => c.Date == yesterday) ||
                 await _db.AdminReconciliations.AnyAsync(r => r.Date == yesterday && r.Status == "submitted");
             return yesterdayCommitted ? today : yesterday;
         }
 
-        private async Task<bool> IsDateCommittedAsync(int userId, DateOnly date) =>
-            await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == date) ||
+        private async Task<bool> IsDateCommittedAsync(int _, DateOnly date) =>
+            await _db.SummaryCommits.AnyAsync(c => c.Date == date) ||
             await _db.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
 
         public async Task<SummaryResponse> GetTodayAsync(int userId)
@@ -452,6 +454,18 @@ namespace Sales.Services
                 };
             }
 
+            if (await _db.AdminReconciliations.AnyAsync(r => r.Date == targetDate && r.Status == "pending"))
+            {
+                return new ZReportEmailResult
+                {
+                    IsCommitted          = false,
+                    IsPendingAdminReview = true,
+                    TargetDate           = targetDate,
+                    Message              = $"The difference for {targetDate:dd-MM-yyyy} exceeded £5.00 and is awaiting admin review. Only an admin can resolve it.",
+                    Email                = null,
+                };
+            }
+
             var emails = await _gmail.GetEmailsAsync(new GmailRequest
             {
                 SubjectKeyword = "Z-Report",
@@ -566,10 +580,17 @@ namespace Sales.Services
             var activeDate = await GetActiveDateAsync(userId);
 
             var existing = await _db.SummaryCommits
-                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == activeDate);
+                .FirstOrDefaultAsync(c => c.Date == activeDate);
 
             if (existing is not null)
                 throw new InvalidOperationException("This day's summary is already committed.");
+
+            var pendingAdminReview = await _db.AdminReconciliations
+                .AnyAsync(r => r.Date == activeDate && r.Status == "pending");
+
+            if (pendingAdminReview)
+                throw new InvalidOperationException(
+                    "This day's difference exceeded £5.00 and is awaiting admin review — only an admin can resolve it.");
 
             // Try to get full Z-report field breakdown for the email
             ZReportComparisonResponse? comparison = null;
@@ -622,7 +643,8 @@ namespace Sales.Services
             if (diff > 5.00m)
             {
                 await SaveFailedCommitAsPendingAsync(userId, activeDate, emailPayload, diff);
-                await _email.SendComparisonEmailAsync(emailPayload, committed: false);
+                try { await _email.SendComparisonEmailAsync(emailPayload, committed: false); }
+                catch { /* email failure must not corrupt the commit-rejection response */ }
                 throw new InvalidOperationException(
                     $"Cannot commit — difference of £{diff:F2} exceeds the £5.00 limit. A notification email has been sent.");
             }
