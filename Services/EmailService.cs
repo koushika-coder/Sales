@@ -51,7 +51,8 @@ namespace Sales.Services
                 Timeout      = 10000,
             };
 
-            await client.SendMailAsync(message);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendPasswordResetEmailAsync(string toEmail, string name, string tempPassword)
@@ -81,7 +82,8 @@ namespace Sales.Services
                 EnableSsl   = true,
                 Timeout     = 10000,
             };
-            await client.SendMailAsync(message);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendReconciliationSubmittedEmailAsync(AdminSubmitReconciliationRequest data, DateOnly date)
@@ -150,7 +152,8 @@ namespace Sales.Services
                 EnableSsl   = true,
                 Timeout     = 10000,
             };
-            await client.SendMailAsync(message);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendStaffLockedOutToAdminsAsync(
@@ -194,7 +197,8 @@ namespace Sales.Services
             {
                 if (string.IsNullOrWhiteSpace(email)) continue;
                 using var msg = new MailMessage(sender, email, subject, body) { IsBodyHtml = true };
-                await client.SendMailAsync(msg);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await client.SendMailAsync(msg, cts.Token);
             }
         }
 
@@ -241,7 +245,8 @@ namespace Sales.Services
                 EnableSsl   = true,
                 Timeout     = 10000,
             };
-            await client.SendMailAsync(message);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         private static string Row(string section, string field, decimal value) =>
