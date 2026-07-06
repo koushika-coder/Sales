@@ -206,9 +206,8 @@ namespace Sales.Services
 
             var existing = await _db.AdminReconciliations.FirstOrDefaultAsync(r => r.Date == date);
 
-            if (existing is not null && existing.Status == "submitted")
-                throw new InvalidOperationException($"Reconciliation for {date} has already been submitted.");
-
+            // Admins can revise a submitted reconciliation as many times as needed —
+            // no lock after the first submit, unlike the staff commit flow.
             if (existing is null)
             {
                 existing = new AdminReconciliation { Date = date, CreatedAt = DateTime.UtcNow };
