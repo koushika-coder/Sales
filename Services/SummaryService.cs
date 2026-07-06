@@ -167,7 +167,10 @@ namespace Sales.Services
             }
 
             var commit = await _db.SummaryCommits
-                .FirstOrDefaultAsync(c => c.UserId == userId && c.Date == date);
+                .FirstOrDefaultAsync(c => c.Date == date);
+
+            var pendingAdminReview = await _db.AdminReconciliations
+                .AnyAsync(r => r.Date == date && r.Status == "pending");
 
             var hasInventoryToday = await _db.LotteryInventory
                 .AnyAsync(li => li.UserId == userId && li.InventoryDate >= start && li.InventoryDate < end);
@@ -201,6 +204,7 @@ namespace Sales.Services
                 PaypointValue = paypoint?.PaypointValue ?? 0m,
                 IsCommitted = commit is not null,
                 CommittedAt = commit?.CommittedAt,
+                IsPendingAdminReview = pendingAdminReview,
                 HasTodayData = hasTodayData,
             };
         }

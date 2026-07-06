@@ -213,6 +213,10 @@ namespace Sales.DTOs
         public bool IsCommitted { get; set; }
         public DateTime? CommittedAt { get; set; }
 
+        // True when the active date's difference exceeded £5.00 and is locked awaiting
+        // admin review — data entry should be read-only until an admin resolves it.
+        public bool IsPendingAdminReview { get; set; }
+
         // True when at least one record exists for the active date (or an uncommitted fallback).
         // False means the active date is fresh — no data entered yet.
         public bool HasTodayData { get; set; }
