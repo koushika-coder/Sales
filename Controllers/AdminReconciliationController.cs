@@ -38,6 +38,9 @@ namespace Sales.Controllers
                 result.PasswordConfigured,
                 result.Recipient,
                 result.Error,
+                result.TcpConnected,
+                result.TcpElapsedMs,
+                result.TcpError,
             });
         }
 

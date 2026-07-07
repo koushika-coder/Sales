@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using System.Net.Sockets;
 using System.Text;
 using Sales.DTOs;
 
@@ -7,9 +8,12 @@ namespace Sales.Services
 {
     // Diagnostic-only: reports exactly what config the app resolved, alongside the
     // send outcome, so a bad/missing env var is visible without digging through logs.
+    // TcpConnected distinguishes a network/firewall-level block (TCP itself never
+    // connects) from a failure later in the TLS/AUTH handshake.
     public record SmtpTestResult(
         bool Success, string Host, int Port, string Sender,
-        bool PasswordConfigured, string Recipient, string? Error);
+        bool PasswordConfigured, string Recipient, string? Error,
+        bool TcpConnected, long TcpElapsedMs, string? TcpError);
 
     public interface IEmailService
     {
@@ -41,9 +45,29 @@ namespace Sales.Services
             var recipient = _config["Email:RecipientEmail"] ?? "";
             var passwordConfigured = !string.IsNullOrWhiteSpace(password);
 
+            // Raw TCP connect first, separate from the full SMTP handshake — tells us
+            // whether Render's network reaches Gmail at the transport layer at all,
+            // before TLS/AUTH ever come into play.
+            var tcpSw = System.Diagnostics.Stopwatch.StartNew();
+            bool tcpConnected;
+            string? tcpError = null;
+            try
+            {
+                using var tcp = new TcpClient();
+                using var tcpCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                await tcp.ConnectAsync(host, port, tcpCts.Token);
+                tcpConnected = tcp.Connected;
+            }
+            catch (Exception ex)
+            {
+                tcpConnected = false;
+                tcpError = ex.Message;
+            }
+            var tcpElapsedMs = tcpSw.ElapsedMilliseconds;
+
             if (string.IsNullOrWhiteSpace(recipient))
                 return new SmtpTestResult(false, host, port, sender, passwordConfigured, recipient,
-                    "Email:RecipientEmail is not configured.");
+                    "Email:RecipientEmail is not configured.", tcpConnected, tcpElapsedMs, tcpError);
 
             try
             {
@@ -62,11 +86,13 @@ namespace Sales.Services
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await client.SendMailAsync(message, cts.Token);
 
-                return new SmtpTestResult(true, host, port, sender, passwordConfigured, recipient, null);
+                return new SmtpTestResult(true, host, port, sender, passwordConfigured, recipient, null,
+                    tcpConnected, tcpElapsedMs, tcpError);
             }
             catch (Exception ex)
             {
-                return new SmtpTestResult(false, host, port, sender, passwordConfigured, recipient, ex.Message);
+                return new SmtpTestResult(false, host, port, sender, passwordConfigured, recipient, ex.Message,
+                    tcpConnected, tcpElapsedMs, tcpError);
             }
         }
 
