@@ -168,6 +168,9 @@ public class UserService : IUserService
         if (user == null)
             return (false, "No user found with that email address.");
 
+        if (authService.HashPassword(newPassword) == user.PasswordHash)
+            return (false, "New password cannot be the same as the old password. Please create a new password.");
+
         user.PasswordHash = authService.HashPassword(newPassword);
         user.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();

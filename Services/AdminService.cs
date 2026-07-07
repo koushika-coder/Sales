@@ -139,6 +139,9 @@ public class AdminService : IAdminService
         if (admin == null)
             return (false, "Admin not found.");
 
+        if (authService.HashPassword(newPassword) == admin.PasswordHash)
+            return (false, "New password cannot be the same as the old password. Please create a new password.");
+
         admin.PasswordHash = authService.HashPassword(newPassword);
         admin.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
