@@ -240,7 +240,7 @@ namespace Sales.Services
                     inventory.TotalSold * request.Price;
 
                 inventory.UpdatedByUserId = userId;
-                inventory.UpdatedDate = DateTime.Now;
+                inventory.UpdatedDate = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();
             }
@@ -295,7 +295,7 @@ namespace Sales.Services
                 ScratchCardNo = request.ScratchCardNo.Trim(),
                 Price = request.Price,
                 IsActive = true,
-                CreatedDate = DateTime.Now,
+                CreatedDate = DateTime.UtcNow,
             });
 
             await _context.SaveChangesAsync();

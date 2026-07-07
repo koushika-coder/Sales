@@ -96,7 +96,7 @@ namespace Sales.Services
                 SupplierId = request.SupplierId,
                 InvoiceNo = request.InvoiceNo.Trim(),
                 Value = request.Value,
-                CreatedAt = DateTime.Now,
+                CreatedAt = DateTime.UtcNow,
             });
 
             await _db.SaveChangesAsync();

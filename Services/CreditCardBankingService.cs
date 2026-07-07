@@ -39,7 +39,7 @@ namespace Sales.Services
                 UserId = userId,
                 ManualCardAmount = request.ManualCardAmount,
                 CardAmount = request.CardAmount,
-                CreatedDate = DateTime.Now
+                CreatedDate = DateTime.UtcNow
             };
 
             _context.CreditCardBanking.Add(entity);
