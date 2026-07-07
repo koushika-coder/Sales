@@ -5,11 +5,17 @@ using Sales.DTOs;
 
 namespace Sales.Services
 {
+    // Diagnostic-only: reports exactly what config the app resolved, alongside the
+    // send outcome, so a bad/missing env var is visible without digging through logs.
+    public record SmtpTestResult(
+        bool Success, string Host, int Port, string Sender,
+        bool PasswordConfigured, string Recipient, string? Error);
+
     public interface IEmailService
     {
         // Diagnostic-only: sends a minimal test email so SMTP connectivity can be verified
         // without touching any real data or user password.
-        Task SendTestEmailAsync();
+        Task<SmtpTestResult> SendTestEmailAsync();
         Task SendComparisonEmailAsync(ZReportComparisonResponse comparison, bool committed);
         Task SendPasswordResetEmailAsync(string toEmail, string name, string tempPassword);
         Task SendReconciliationSubmittedEmailAsync(AdminSubmitReconciliationRequest data, DateOnly date);
@@ -26,31 +32,42 @@ namespace Sales.Services
             _config = config;
         }
 
-        public async Task SendTestEmailAsync()
+        public async Task<SmtpTestResult> SendTestEmailAsync()
         {
             var host      = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
             var port      = int.Parse(_config["Email:SmtpPort"] ?? "587");
             var sender    = _config["Email:SenderEmail"]    ?? "";
             var password  = _config["Email:SenderPassword"] ?? "";
             var recipient = _config["Email:RecipientEmail"] ?? "";
+            var passwordConfigured = !string.IsNullOrWhiteSpace(password);
 
             if (string.IsNullOrWhiteSpace(recipient))
-                throw new InvalidOperationException("Email:RecipientEmail is not configured.");
+                return new SmtpTestResult(false, host, port, sender, passwordConfigured, recipient,
+                    "Email:RecipientEmail is not configured.");
 
-            using var message = new MailMessage(sender, recipient,
-                "SMTP Test Email — Sales App",
-                $"<html><body>This is a diagnostic test email sent at {DateTime.UtcNow:u} UTC to verify SMTP connectivity.</body></html>")
-            { IsBodyHtml = true };
-
-            using var client = new SmtpClient(host, port)
+            try
             {
-                Credentials = new NetworkCredential(sender, password),
-                EnableSsl   = true,
-                Timeout     = 10000,
-            };
+                using var message = new MailMessage(sender, recipient,
+                    "SMTP Test Email — Sales App",
+                    $"<html><body>This is a diagnostic test email sent at {DateTime.UtcNow:u} UTC to verify SMTP connectivity.</body></html>")
+                { IsBodyHtml = true };
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await client.SendMailAsync(message, cts.Token);
+                using var client = new SmtpClient(host, port)
+                {
+                    Credentials = new NetworkCredential(sender, password),
+                    EnableSsl   = true,
+                    Timeout     = 10000,
+                };
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await client.SendMailAsync(message, cts.Token);
+
+                return new SmtpTestResult(true, host, port, sender, passwordConfigured, recipient, null);
+            }
+            catch (Exception ex)
+            {
+                return new SmtpTestResult(false, host, port, sender, passwordConfigured, recipient, ex.Message);
+            }
         }
 
         public async Task SendComparisonEmailAsync(ZReportComparisonResponse comparison, bool committed)

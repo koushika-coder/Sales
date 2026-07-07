@@ -27,15 +27,18 @@ namespace Sales.Controllers
                 return StatusCode(403, new { message = "Only admins can test email sending." });
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            try
+            var result = await _email.SendTestEmailAsync();
+            return Ok(new
             {
-                await _email.SendTestEmailAsync();
-                return Ok(new { success = true, elapsedMs = sw.ElapsedMilliseconds, message = "Test email sent successfully." });
-            }
-            catch (Exception ex)
-            {
-                return Ok(new { success = false, elapsedMs = sw.ElapsedMilliseconds, message = ex.Message });
-            }
+                result.Success,
+                elapsedMs = sw.ElapsedMilliseconds,
+                result.Host,
+                result.Port,
+                result.Sender,
+                result.PasswordConfigured,
+                result.Recipient,
+                result.Error,
+            });
         }
 
         // GET api/admin/reconciliation/pending
