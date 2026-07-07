@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Mail;
 using System.Text;
 using Sales.DTOs;
 
@@ -12,57 +14,23 @@ namespace Sales.Services
         Task SendAdminLockedOutSelfAsync(string adminEmail, string adminName, string tempPassword);
     }
 
-    // Sends email via the Resend HTTP API (https://resend.com) instead of raw SMTP.
-    // Render's network hangs/blocks outbound SMTP (confirmed: the same Gmail app-password
-    // credentials worked instantly from a local machine but hung for 130+ seconds on Render),
-    // so email now goes out over HTTPS instead, which isn't blocked.
     public class EmailService : IEmailService
     {
         private readonly IConfiguration _config;
-        private readonly IHttpClientFactory _httpClientFactory;
 
-        public EmailService(IConfiguration config, IHttpClientFactory httpClientFactory)
+        public EmailService(IConfiguration config)
         {
             _config = config;
-            _httpClientFactory = httpClientFactory;
-        }
-
-        private async Task SendAsync(string to, string subject, string html)
-        {
-            var apiKey = _config["Resend:ApiKey"];
-            if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(to))
-                return;
-
-            // Resend requires the "from" address to be on a domain you've verified with them,
-            // or their shared sandbox sender — it can never be an arbitrary Gmail address.
-            var from = _config["Resend:FromAddress"] ?? "onboarding@resend.com";
-
-            var payload = new
-            {
-                from,
-                to = new[] { to },
-                subject,
-                html,
-            };
-
-            using var client = _httpClientFactory.CreateClient();
-            client.BaseAddress = new Uri("https://api.resend.com/");
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var response = await client.PostAsJsonAsync("emails", payload, cts.Token);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync(cts.Token);
-                throw new Exception($"Resend send failed ({response.StatusCode}): {body}");
-            }
         }
 
         public async Task SendComparisonEmailAsync(ZReportComparisonResponse comparison, bool committed)
         {
+            var host      = _config["Email:SmtpHost"]      ?? "smtp.gmail.com";
+            var port      = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender    = _config["Email:SenderEmail"]   ?? "";
+            var password  = _config["Email:SenderPassword"] ?? "";
             var recipient = _config["Email:RecipientEmail"] ?? "";
+
             if (string.IsNullOrWhiteSpace(recipient)) return;
 
             var subject = committed
@@ -71,11 +39,29 @@ namespace Sales.Services
 
             var body = BuildHtml(comparison, committed);
 
-            await SendAsync(recipient, subject, body);
+            using var message = new MailMessage(sender, recipient, subject, body)
+            {
+                IsBodyHtml = true
+            };
+
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl    = true,
+                Timeout      = 10000,
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendPasswordResetEmailAsync(string toEmail, string name, string tempPassword)
         {
+            var host      = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port      = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender    = _config["Email:SenderEmail"]    ?? "";
+            var password  = _config["Email:SenderPassword"] ?? "";
+
             if (string.IsNullOrWhiteSpace(toEmail)) return;
 
             var subject = "Your Temporary Password — Sales App";
@@ -89,12 +75,25 @@ namespace Sales.Services
                 </body></html>
                 """;
 
-            await SendAsync(toEmail, subject, body);
+            using var message = new MailMessage(sender, toEmail, subject, body) { IsBodyHtml = true };
+            using var client  = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+                Timeout     = 10000,
+            };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendReconciliationSubmittedEmailAsync(AdminSubmitReconciliationRequest data, DateOnly date)
         {
+            var host      = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port      = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender    = _config["Email:SenderEmail"]    ?? "";
+            var password  = _config["Email:SenderPassword"] ?? "";
             var recipient = _config["Email:RecipientEmail"] ?? "";
+
             if (string.IsNullOrWhiteSpace(recipient)) return;
 
             var subject = $"✅ Reconciliation Submitted — {date:dd/MM/yyyy}";
@@ -146,7 +145,15 @@ namespace Sales.Services
                 </body></html>
                 """;
 
-            await SendAsync(recipient, subject, body);
+            using var message = new MailMessage(sender, recipient, subject, body) { IsBodyHtml = true };
+            using var client  = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+                Timeout     = 10000,
+            };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         public async Task SendStaffLockedOutToAdminsAsync(
@@ -154,6 +161,11 @@ namespace Sales.Services
             string staffEmail,
             IEnumerable<(string Email, string Name)> adminRecipients)
         {
+            var host     = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port     = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender   = _config["Email:SenderEmail"]    ?? "";
+            var password = _config["Email:SenderPassword"] ?? "";
+
             var subject = $"⚠️ Login Alert — {staffName}'s Account Locked After 5 Failed Attempts";
             var body = $"""
                 <html><body style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;'>
@@ -174,15 +186,29 @@ namespace Sales.Services
                 </body></html>
                 """;
 
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+                Timeout     = 10000,
+            };
+
             foreach (var (email, _) in adminRecipients)
             {
                 if (string.IsNullOrWhiteSpace(email)) continue;
-                await SendAsync(email, subject, body);
+                using var msg = new MailMessage(sender, email, subject, body) { IsBodyHtml = true };
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await client.SendMailAsync(msg, cts.Token);
             }
         }
 
         public async Task SendAdminLockedOutSelfAsync(string adminEmail, string adminName, string tempPassword)
         {
+            var host     = _config["Email:SmtpHost"]       ?? "smtp.gmail.com";
+            var port     = int.Parse(_config["Email:SmtpPort"] ?? "587");
+            var sender   = _config["Email:SenderEmail"]    ?? "";
+            var password = _config["Email:SenderPassword"] ?? "";
+
             if (string.IsNullOrWhiteSpace(adminEmail)) return;
 
             var subject = "🔒 Your Admin Account — Temporary Password (5 Failed Logins)";
@@ -212,7 +238,15 @@ namespace Sales.Services
                 </body></html>
                 """;
 
-            await SendAsync(adminEmail, subject, body);
+            using var message = new MailMessage(sender, adminEmail, subject, body) { IsBodyHtml = true };
+            using var client  = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(sender, password),
+                EnableSsl   = true,
+                Timeout     = 10000,
+            };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.SendMailAsync(message, cts.Token);
         }
 
         private static string Row(string section, string field, decimal value) =>
