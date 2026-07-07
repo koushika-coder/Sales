@@ -14,7 +14,7 @@ public interface IAdminService
     Task<AdminDto?> UpdateAdminAsync(int adminId, string? name, string? department);
     Task<bool> DeleteAdminAsync(int adminId);
     Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
-    Task<(bool Success, string? Error)> AdminResetPasswordAsync(int adminId, string newPassword, IAuthService authService);
+    Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService);
 }
 
 public class AdminService : IAdminService
@@ -133,11 +133,11 @@ public class AdminService : IAdminService
         return (true, admin.Name, tempPassword, null);
     }
 
-    public async Task<(bool Success, string? Error)> AdminResetPasswordAsync(int adminId, string newPassword, IAuthService authService)
+    public async Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService)
     {
-        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.AdminId == adminId);
+        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.Email == email);
         if (admin == null)
-            return (false, "Admin not found.");
+            return (false, "No admin found with that email address.");
 
         if (authService.HashPassword(newPassword) == admin.PasswordHash)
             return (false, "New password cannot be the same as the old password. Please create a new password.");

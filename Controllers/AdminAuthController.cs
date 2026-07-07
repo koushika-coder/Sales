@@ -62,10 +62,13 @@ public class AdminAuthController(
         if (HttpContext.Items["AdminId"] == null)
             return Forbid();
 
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return BadRequest(new { message = "Email is required." });
+
         if (string.IsNullOrWhiteSpace(request.NewPassword))
             return BadRequest(new { message = "New password is required." });
 
-        var (success, error) = await _adminService.AdminResetPasswordAsync(request.AdminId, request.NewPassword, _authService);
+        var (success, error) = await _adminService.AdminResetPasswordAsync(request.Email, request.NewPassword, _authService);
         if (!success)
             return BadRequest(new { message = error });
 

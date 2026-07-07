@@ -128,6 +128,6 @@ public class AdminResetUserPasswordRequest
 
 public class AdminResetAdminPasswordRequest
 {
-    public int AdminId { get; set; }
+    public string Email { get; set; } = string.Empty;
     public string NewPassword { get; set; } = string.Empty;
 }
