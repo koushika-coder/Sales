@@ -62,12 +62,35 @@ namespace Sales.Services
             await _db.SaveChangesAsync();
         }
 
+        // "Active date" mirrors SummaryService.GetActiveDateAsync — yesterday while it's
+        // still uncommitted, otherwise today — so invoices saved while working on an
+        // uncommitted day actually show up under that day instead of literal calendar
+        // "today" (DateTime.Today was also server-local, not UTC, compounding the bug).
+        private async Task<DateOnly> GetActiveDateAsync()
+        {
+            var today     = DateOnly.FromDateTime(DateTime.UtcNow);
+            var yesterday = today.AddDays(-1);
+
+            var todayCommitted =
+                await _db.SummaryCommits.AnyAsync(c => c.Date == today) ||
+                await _db.AdminReconciliations.AnyAsync(r => r.Date == today && r.Status == "submitted");
+            if (todayCommitted) return today.AddDays(1);
+
+            var yesterdayCommitted =
+                await _db.SummaryCommits.AnyAsync(c => c.Date == yesterday) ||
+                await _db.AdminReconciliations.AnyAsync(r => r.Date == yesterday && r.Status == "submitted");
+            return yesterdayCommitted ? today : yesterday;
+        }
+
         public async Task<IEnumerable<SupplierInvoiceResponse>> GetTodayInvoices(int userId)
         {
-            var today = DateTime.Today;
+            var activeDate = await GetActiveDateAsync();
+            var start = activeDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var end   = start.AddDays(1);
+
             return await _db.SupplierInvoices
                 .Include(i => i.Supplier)
-                .Where(i => i.UserId == userId && i.CreatedAt.Date == today)
+                .Where(i => i.UserId == userId && i.CreatedAt >= start && i.CreatedAt < end)
                 .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new SupplierInvoiceResponse
                 {
