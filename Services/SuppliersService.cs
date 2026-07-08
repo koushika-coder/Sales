@@ -90,7 +90,7 @@ namespace Sales.Services
 
             return await _db.SupplierInvoices
                 .Include(i => i.Supplier)
-                .Where(i => i.UserId == userId && i.CreatedAt >= start && i.CreatedAt < end)
+                .Where(i => i.CreatedAt >= start && i.CreatedAt < end)
                 .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new SupplierInvoiceResponse
                 {
@@ -128,7 +128,7 @@ namespace Sales.Services
         public async Task DeleteInvoice(int userId, int invoiceId)
         {
             var invoice = await _db.SupplierInvoices
-                .FirstOrDefaultAsync(i => i.Id == invoiceId && i.UserId == userId);
+                .FirstOrDefaultAsync(i => i.Id == invoiceId);
 
             if (invoice == null)
                 throw new KeyNotFoundException("Invoice not found.");

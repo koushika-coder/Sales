@@ -17,7 +17,7 @@ namespace Sales.Services
         }
 
         private async Task<bool> IsDateCommittedAsync(int userId, DateOnly date) =>
-            await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == date) ||
+            await _context.SummaryCommits.AnyAsync(c => c.Date == date) ||
             await _context.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
 
         private async Task<(DateOnly activeDate, DateTime start, DateTime end, DateTime recordAt)> GetActiveDateRangeAsync(int userId)
@@ -65,7 +65,6 @@ namespace Sales.Services
 
             var existing = await _context.Lotteries
                 .FirstOrDefaultAsync(x =>
-                    x.UserId == userId &&
                     x.CreatedDate >= start &&
                     x.CreatedDate < end);
 
@@ -95,8 +94,7 @@ namespace Sales.Services
             var (_, start, end, _) = await GetActiveDateRangeAsync(userId);
 
             var record = await _context.Lotteries
-                .Where(x => x.UserId == userId &&
-                            x.CreatedDate >= start &&
+                .Where(x => x.CreatedDate >= start &&
                             x.CreatedDate < end)
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
@@ -105,7 +103,7 @@ namespace Sales.Services
             if (record != null) return record;
 
             var prev = await _context.Lotteries
-                .Where(x => x.UserId == userId && x.CreatedDate < start)
+                .Where(x => x.CreatedDate < start)
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
 
@@ -120,9 +118,7 @@ namespace Sales.Services
             LotteryRequest request)
         {
             var lottery = await _context.Lotteries
-                .FirstOrDefaultAsync(x =>
-                    x.Id == id &&
-                    x.UserId == userId);
+                .FirstOrDefaultAsync(x => x.Id == id);
 
             if (lottery == null)
             {

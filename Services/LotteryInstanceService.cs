@@ -22,7 +22,7 @@ namespace Sales.Services
 
             // If today is already committed, move to tomorrow.
             var todayCommitted =
-                await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == todayUtc) ||
+                await _context.SummaryCommits.AnyAsync(c => c.Date == todayUtc) ||
                 await _context.AdminReconciliations.AnyAsync(r => r.Date == todayUtc && r.Status == "submitted");
 
             DateOnly activeDate;
@@ -33,7 +33,7 @@ namespace Sales.Services
             else
             {
                 var yesterdayCommitted =
-                    await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == yesterdayUtc) ||
+                    await _context.SummaryCommits.AnyAsync(c => c.Date == yesterdayUtc) ||
                     await _context.AdminReconciliations.AnyAsync(r => r.Date == yesterdayUtc && r.Status == "submitted");
                 activeDate = yesterdayCommitted ? todayUtc : yesterdayUtc;
             }
@@ -54,10 +54,10 @@ namespace Sales.Services
 
             foreach (var lottery in lotteries)
             {
-                // Check if the user already saved data for the active date
+                // Check if this scratch card already has saved data for the active date —
+                // shared inventory count, not scoped to whoever happens to be counting it.
                 var todayRecord = await _context.LotteryInventory
                     .Where(x => x.LotteryId == lottery.Id
-                             && x.UserId == userId
                              && x.InventoryDate >= activeStart
                              && x.InventoryDate < activeEnd)
                     .FirstOrDefaultAsync();
@@ -82,7 +82,6 @@ namespace Sales.Services
                     // No record yet — derive OpenNo from the previous committed day's CloseNo
                     var lastRecord = await _context.LotteryInventory
                         .Where(x => x.LotteryId == lottery.Id
-                                 && x.UserId == userId
                                  && x.InventoryDate < activeStart)
                         .OrderByDescending(x => x.InventoryDate)
                         .FirstOrDefaultAsync();
@@ -115,7 +114,7 @@ namespace Sales.Services
 
             // If the active date is already committed, return nothing.
             var committed =
-                await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == activeDate) ||
+                await _context.SummaryCommits.AnyAsync(c => c.Date == activeDate) ||
                 await _context.AdminReconciliations.AnyAsync(r => r.Date == activeDate && r.Status == "submitted");
 
             if (committed)
@@ -125,8 +124,7 @@ namespace Sales.Services
                 from inventory in _context.LotteryInventory
                 join lottery in _context.LotteryMaster
                     on inventory.LotteryId equals lottery.Id
-                where inventory.UserId == userId
-                   && inventory.InventoryDate >= activeStart
+                where inventory.InventoryDate >= activeStart
                    && inventory.InventoryDate < activeEnd
                 orderby lottery.ScratchCardNo
                 select new LotteryInventoryReportResponse
@@ -165,7 +163,6 @@ namespace Sales.Services
             var existingRecord = await _context.LotteryInventory
                 .FirstOrDefaultAsync(x =>
                     x.LotteryId == request.LotteryId &&
-                    x.UserId == userId &&
                     x.InventoryDate >= activeStart &&
                     x.InventoryDate < activeEnd);
 

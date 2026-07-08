@@ -13,7 +13,7 @@ namespace Sales.Services
         public DeductionsService(SalesDbContext db) => _db = db;
 
         private async Task<bool> IsDateCommittedAsync(int userId, DateOnly date) =>
-            await _db.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == date) ||
+            await _db.SummaryCommits.AnyAsync(c => c.Date == date) ||
             await _db.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
 
         private async Task<(DateOnly activeDate, DateTime start, DateTime end, DateTime recordAt)> GetActiveDateRangeAsync(int userId)
@@ -60,7 +60,7 @@ namespace Sales.Services
             var (_, start, end, _) = await GetActiveDateRangeAsync(userId);
 
             var record = await _db.Deductions
-                .Where(d => d.UserId == userId && d.CreatedAt >= start && d.CreatedAt < end)
+                .Where(d => d.CreatedAt >= start && d.CreatedAt < end)
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
 
@@ -68,7 +68,7 @@ namespace Sales.Services
             if (record == null)
             {
                 var prev = await _db.Deductions
-                    .Where(d => d.UserId == userId && d.CreatedAt < start)
+                    .Where(d => d.CreatedAt < start)
                     .OrderByDescending(d => d.CreatedAt)
                     .FirstOrDefaultAsync();
 
@@ -101,7 +101,7 @@ namespace Sales.Services
             var (_, start, end, recordAt) = await GetActiveDateRangeAsync(userId);
 
             var existing = await _db.Deductions
-                .Where(d => d.UserId == userId && d.CreatedAt >= start && d.CreatedAt < end)
+                .Where(d => d.CreatedAt >= start && d.CreatedAt < end)
                 .FirstOrDefaultAsync();
 
             if (existing != null)

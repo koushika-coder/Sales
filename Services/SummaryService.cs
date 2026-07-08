@@ -76,8 +76,7 @@ namespace Sales.Services
             var end   = start.AddDays(1);
 
             var creditCardEntries = await _db.CreditCardBanking
-                .Where(c => c.UserId == userId
-                         && c.CreatedDate >= start
+                .Where(c => c.CreatedDate >= start
                          && c.CreatedDate < end)
                 .OrderBy(c => c.CreatedDate)
                 .Select(c => new CreditCardSummaryEntry
@@ -93,17 +92,16 @@ namespace Sales.Services
                 .FirstOrDefaultAsync(s => s.Date == date);
 
             var deduction = await _db.Deductions
-                .Where(d => d.UserId == userId
-                         && d.CreatedAt >= start
+                .Where(d => d.CreatedAt >= start
                          && d.CreatedAt < end)
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
 
-            // Instant lottery: sum inventory for the active date first;
-            // if nothing entered yet, fall back to the most recent uncommitted date's inventory.
+            // Instant lottery: sum inventory for the active date first — shop-wide, not
+            // scoped to one user; if nothing entered yet, fall back to the most recent
+            // uncommitted date's inventory.
             var instantLotteryQuery = _db.LotteryInventory
-                .Where(li => li.UserId == userId
-                          && li.InventoryDate >= start
+                .Where(li => li.InventoryDate >= start
                           && li.InventoryDate < end);
 
             var instantLotteryTotalCount = await instantLotteryQuery.SumAsync(li => (int?)li.TotalSold) ?? 0;
@@ -112,7 +110,7 @@ namespace Sales.Services
             if (instantLotteryTotalCount == 0 && instantLotteryTotalSales == 0m)
             {
                 var latestInventoryTs = await _db.LotteryInventory
-                    .Where(li => li.UserId == userId && li.InventoryDate < start)
+                    .Where(li => li.InventoryDate < start)
                     .MaxAsync(li => (DateTime?)li.InventoryDate);
 
                 if (latestInventoryTs.HasValue)
@@ -123,17 +121,16 @@ namespace Sales.Services
                     if (!latestCommitted)
                     {
                         var fallback = _db.LotteryInventory
-                            .Where(li => li.UserId == userId && li.InventoryDate == latestInventoryTs.Value);
+                            .Where(li => li.InventoryDate == latestInventoryTs.Value);
                         instantLotteryTotalCount = await fallback.SumAsync(li => (int?)li.TotalSold) ?? 0;
                         instantLotteryTotalSales = await fallback.SumAsync(li => (decimal?)li.Sales) ?? 0m;
                     }
                 }
             }
 
-            // Lottery value: active date first, then most recent uncommitted record.
+            // Lottery value: active date first, then most recent uncommitted record — shop-wide.
             var lottery = await _db.Lotteries
-                .Where(l => l.UserId == userId
-                         && l.CreatedDate >= start
+                .Where(l => l.CreatedDate >= start
                          && l.CreatedDate < end)
                 .OrderByDescending(l => l.CreatedDate)
                 .FirstOrDefaultAsync();
@@ -141,17 +138,16 @@ namespace Sales.Services
             if (lottery == null)
             {
                 var prevLottery = await _db.Lotteries
-                    .Where(l => l.UserId == userId && l.CreatedDate < start)
+                    .Where(l => l.CreatedDate < start)
                     .OrderByDescending(l => l.CreatedDate)
                     .FirstOrDefaultAsync();
                 if (prevLottery != null && !await IsDateCommittedAsync(userId, DateOnly.FromDateTime(prevLottery.CreatedDate)))
                     lottery = prevLottery;
             }
 
-            // Paypoint value: active date first, then most recent uncommitted record.
+            // Paypoint value: active date first, then most recent uncommitted record — shop-wide.
             var paypoint = await _db.Paypoints
-                .Where(p => p.UserId == userId
-                         && p.CreatedDate >= start
+                .Where(p => p.CreatedDate >= start
                          && p.CreatedDate < end)
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
@@ -159,7 +155,7 @@ namespace Sales.Services
             if (paypoint == null)
             {
                 var prevPaypoint = await _db.Paypoints
-                    .Where(p => p.UserId == userId && p.CreatedDate < start)
+                    .Where(p => p.CreatedDate < start)
                     .OrderByDescending(p => p.CreatedDate)
                     .FirstOrDefaultAsync();
                 if (prevPaypoint != null && !await IsDateCommittedAsync(userId, DateOnly.FromDateTime(prevPaypoint.CreatedDate)))
@@ -173,7 +169,7 @@ namespace Sales.Services
                 .AnyAsync(r => r.Date == date && r.Status == "pending");
 
             var hasInventoryToday = await _db.LotteryInventory
-                .AnyAsync(li => li.UserId == userId && li.InventoryDate >= start && li.InventoryDate < end);
+                .AnyAsync(li => li.InventoryDate >= start && li.InventoryDate < end);
 
             var hasTodayData = deduction != null
                 || safeDrop != null
@@ -224,7 +220,7 @@ namespace Sales.Services
                 if (entry.Id > 0)
                 {
                     var existing = await _db.CreditCardBanking
-                        .FirstOrDefaultAsync(c => c.Id == entry.Id && c.UserId == userId);
+                        .FirstOrDefaultAsync(c => c.Id == entry.Id);
 
                     if (existing is not null)
                     {
@@ -265,10 +261,9 @@ namespace Sales.Services
                 safeDrop.UpdatedAt = DateTime.UtcNow;
             }
 
-            // Deductions
+            // Deductions — one shared row per date, shop-wide
             var deduction = await _db.Deductions
-                .Where(d => d.UserId == userId
-                         && d.CreatedAt >= activeStart
+                .Where(d => d.CreatedAt >= activeStart
                          && d.CreatedAt < activeEnd)
                 .OrderByDescending(d => d.CreatedAt)
                 .FirstOrDefaultAsync();
@@ -297,10 +292,9 @@ namespace Sales.Services
                 deduction.LotteryPayout = request.LotteryPayout;
             }
 
-            // Lottery Management
+            // Lottery Management — one shared row per date, shop-wide
             var lottery = await _db.Lotteries
-                .Where(l => l.UserId == userId
-                         && l.CreatedDate >= activeStart
+                .Where(l => l.CreatedDate >= activeStart
                          && l.CreatedDate < activeEnd)
                 .OrderByDescending(l => l.CreatedDate)
                 .FirstOrDefaultAsync();
@@ -321,10 +315,9 @@ namespace Sales.Services
                 lottery.UpdatedDate = DateTime.UtcNow;
             }
 
-            // Paypoint Management
+            // Paypoint Management — one shared row per date, shop-wide
             var paypoint = await _db.Paypoints
-                .Where(p => p.UserId == userId
-                         && p.CreatedDate >= activeStart
+                .Where(p => p.CreatedDate >= activeStart
                          && p.CreatedDate < activeEnd)
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();

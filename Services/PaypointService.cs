@@ -15,7 +15,7 @@ namespace Sales.Services
         }
 
         private async Task<bool> IsDateCommittedAsync(int userId, DateOnly date) =>
-            await _context.SummaryCommits.AnyAsync(c => c.UserId == userId && c.Date == date) ||
+            await _context.SummaryCommits.AnyAsync(c => c.Date == date) ||
             await _context.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
 
         private async Task<(DateOnly activeDate, DateTime start, DateTime end, DateTime recordAt)> GetActiveDateRangeAsync(int userId)
@@ -61,7 +61,6 @@ namespace Sales.Services
 
             var existingPaypoint = await _context.Paypoints
                 .FirstOrDefaultAsync(x =>
-                    x.UserId == userId &&
                     x.CreatedDate >= start &&
                     x.CreatedDate < end);
 
@@ -91,8 +90,7 @@ namespace Sales.Services
             var (_, start, end, _) = await GetActiveDateRangeAsync(userId);
 
             var record = await _context.Paypoints
-                .Where(x => x.UserId == userId &&
-                            x.CreatedDate >= start &&
+                .Where(x => x.CreatedDate >= start &&
                             x.CreatedDate < end)
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
@@ -101,7 +99,7 @@ namespace Sales.Services
             if (record != null) return record;
 
             var prev = await _context.Paypoints
-                .Where(x => x.UserId == userId && x.CreatedDate < start)
+                .Where(x => x.CreatedDate < start)
                 .OrderByDescending(x => x.CreatedDate)
                 .FirstOrDefaultAsync();
 
@@ -112,9 +110,7 @@ namespace Sales.Services
         public async Task<Paypoint> UpdateAsync(int userId, int id,PaypointRequest request)
         {
             var paypoint = await _context.Paypoints
-                .FirstOrDefaultAsync(x =>
-                    x.Id == id &&
-                    x.UserId == userId);
+                .FirstOrDefaultAsync(x => x.Id == id);
 
             if (paypoint == null)
             {
