@@ -26,7 +26,7 @@ public class AdminAuthController(
         if (role != "admin")
             return StatusCode(403, new { message = "Only admins can register other admins." });
 
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.PasswordHash) || string.IsNullOrWhiteSpace(request.Name))
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(request.Name))
             return BadRequest(new { message = "Email, password, and name are required" });
 
         var admin = await _adminService.RegisterAsync(request, _authService);

@@ -36,7 +36,7 @@ public class AdminService : IAdminService
         var admin = new Admin
         {
             Email = request.Email,
-            PasswordHash = authService.HashPassword(request.PasswordHash),
+            PasswordHash = authService.HashPassword(request.Password),
             Name = request.Name,
             Department = request.Department,
             Role = "admin",
