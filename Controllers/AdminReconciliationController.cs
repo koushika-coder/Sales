@@ -80,15 +80,21 @@ namespace Sales.Controllers
             }
         }
 
-        // GET api/admin/reconciliation/committed
+        // GET api/admin/reconciliation/committed?fromDate=2026-06-01&toDate=2026-06-30
+        // Both dates are optional. When supplied, the range is inclusive.
         [HttpGet("committed")]
-        public async Task<IActionResult> GetAllCommitted()
+        public async Task<IActionResult> GetAllCommitted(
+            [FromQuery] DateOnly? fromDate,
+            [FromQuery] DateOnly? toDate)
         {
             var role = User.FindFirst("role")?.Value;
             if (role != "admin")
                 return StatusCode(403, new { message = "Only admins can register other admins." });
 
-            var result = await _service.GetAllCommittedAsync();
+            if (fromDate is not null && toDate is not null && fromDate > toDate)
+                return BadRequest(new { message = "fromDate must be on or before toDate." });
+
+            var result = await _service.GetAllCommittedAsync(fromDate, toDate);
             return Ok(result);
         }
 

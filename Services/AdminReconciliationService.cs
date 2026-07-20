@@ -14,7 +14,7 @@ namespace Sales.Services
         Task<PendingReconciliationResponse> SubmitAsync(int adminId, AdminSubmitReconciliationRequest request);
 
         // All committed summaries — list for date picker
-        Task<List<CommittedSummaryListItem>> GetAllCommittedAsync();
+        Task<List<CommittedSummaryListItem>> GetAllCommittedAsync(DateOnly? fromDate = null, DateOnly? toDate = null);
 
         // Full breakdown for a specific committed date
         Task<CommittedSummaryDetailResponse?> GetCommittedByDateAsync(DateOnly date);
@@ -268,10 +268,16 @@ namespace Sales.Services
 
         // ── Committed history ────────────────────────────────────────────────
 
-        public async Task<List<CommittedSummaryListItem>> GetAllCommittedAsync()
+        public async Task<List<CommittedSummaryListItem>> GetAllCommittedAsync(DateOnly? fromDate = null, DateOnly? toDate = null)
         {
             // Staff self-commits
-            var staffItems = await _db.SummaryCommits
+            var staffQuery = _db.SummaryCommits.AsQueryable();
+            if (fromDate is not null)
+                staffQuery = staffQuery.Where(c => c.Date >= fromDate.Value);
+            if (toDate is not null)
+                staffQuery = staffQuery.Where(c => c.Date <= toDate.Value);
+
+            var staffItems = await staffQuery
                 .OrderByDescending(c => c.Date)
                 .Select(c => new CommittedSummaryListItem
                 {
@@ -287,8 +293,14 @@ namespace Sales.Services
             var staffDates = staffItems.Select(x => x.Date).ToHashSet();
 
             // Admin-reconciled dates that were never self-committed by staff
-            var adminItems = await _db.AdminReconciliations
-                .Where(r => r.Status == "submitted" && !staffDates.Contains(r.Date))
+            var adminQuery = _db.AdminReconciliations
+                .Where(r => r.Status == "submitted" && !staffDates.Contains(r.Date));
+            if (fromDate is not null)
+                adminQuery = adminQuery.Where(r => r.Date >= fromDate.Value);
+            if (toDate is not null)
+                adminQuery = adminQuery.Where(r => r.Date <= toDate.Value);
+
+            var adminItems = await adminQuery
                 .OrderByDescending(r => r.Date)
                 .Select(r => new CommittedSummaryListItem
                 {
