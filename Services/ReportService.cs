@@ -1,12 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Sales.Data;
 using Sales.DTOs;
+using System.Globalization;
+using System.Text;
 
 namespace Sales.Services
 {
     public interface IReportService
     {
         Task<List<ReportListItem>> GetAllReportsAsync();
+        Task<List<ReportListItem>> GetReportsAsync(DateOnly? startDate, DateOnly? endDate);
+        Task<byte[]> GenerateReportsPdfAsync(DateOnly? startDate, DateOnly? endDate);
         Task<ReportDetailResponse?> GetReportByDateAsync(DateOnly date);
     }
 
@@ -23,24 +27,36 @@ namespace Sales.Services
 
         // ── All committed dates, newest first ────────────────────────────────
 
-        public async Task<List<ReportListItem>> GetAllReportsAsync()
+        public async Task<List<ReportListItem>> GetAllReportsAsync() => await GetReportsAsync(null, null);
+
+        public async Task<List<ReportListItem>> GetReportsAsync(DateOnly? startDate, DateOnly? endDate)
         {
-            // Staff commits with their user
-            var commits = await _db.SummaryCommits
+            var commitsQuery = _db.SummaryCommits
                 .Include(c => c.User)
+                .AsQueryable();
+
+            if (startDate.HasValue)
+                commitsQuery = commitsQuery.Where(c => c.Date >= startDate.Value);
+            if (endDate.HasValue)
+                commitsQuery = commitsQuery.Where(c => c.Date <= endDate.Value);
+
+            var commits = await commitsQuery
                 .OrderByDescending(c => c.Date)
                 .ToListAsync();
 
             var staffDates = commits.Select(c => c.Date).ToHashSet();
 
-            // Admin reconciliations
-            var adminRecs = await _db.AdminReconciliations
-                .Where(r => r.Status == "submitted")
-                .ToListAsync();
+            var adminRecsQuery = _db.AdminReconciliations
+                .Where(r => r.Status == "submitted");
+            if (startDate.HasValue)
+                adminRecsQuery = adminRecsQuery.Where(r => r.Date >= startDate.Value);
+            if (endDate.HasValue)
+                adminRecsQuery = adminRecsQuery.Where(r => r.Date <= endDate.Value);
+
+            var adminRecs = await adminRecsQuery.ToListAsync();
 
             var adminRecByDate = adminRecs.ToDictionary(r => r.Date);
 
-            // Load all relevant user names in one query (staff + admins)
             var allUserIds = commits.Select(c => c.UserId)
                 .Concat(adminRecs.Where(r => r.SubmittedByAdminId.HasValue)
                                  .Select(r => r.SubmittedByAdminId!.Value))
@@ -53,7 +69,6 @@ namespace Sales.Services
 
             var result = new List<ReportListItem>();
 
-            // Staff-committed dates (with optional admin reconciliation overlay)
             foreach (var commit in commits)
             {
                 adminRecByDate.TryGetValue(commit.Date, out var adminRec);
@@ -83,7 +98,6 @@ namespace Sales.Services
                 });
             }
 
-            // Admin-only dates (no staff commit)
             foreach (var adminRec in adminRecs.Where(r => !staffDates.Contains(r.Date))
                                               .OrderByDescending(r => r.Date))
             {
@@ -110,6 +124,12 @@ namespace Sales.Services
             }
 
             return result.OrderByDescending(r => r.Date).ToList();
+        }
+
+        public async Task<byte[]> GenerateReportsPdfAsync(DateOnly? startDate, DateOnly? endDate)
+        {
+            var reports = await GetReportsAsync(startDate, endDate);
+            return BuildSimplePdf(reports, startDate, endDate);
         }
 
         // ── Full detail for a single date ────────────────────────────────────
@@ -273,6 +293,85 @@ namespace Sales.Services
 
         private static ReportFieldRow Row(string section, string field, decimal staff, decimal z) =>
             new() { Section = section, Field = field, StaffValue = staff, ZReportValue = z, Variance = staff - z };
+
+        private static byte[] BuildSimplePdf(IEnumerable<ReportListItem> reports, DateOnly? startDate, DateOnly? endDate)
+        {
+            var lines = new List<string>
+            {
+                "Reconciliation Reports",
+                startDate.HasValue || endDate.HasValue
+                    ? $"Period: {(startDate?.ToString("yyyy-MM-dd") ?? "start")} to {(endDate?.ToString("yyyy-MM-dd") ?? "end")}" 
+                    : "All available records",
+                string.Empty,
+                "Date | Summary | Z-Report | Variance | Status"
+            };
+
+            if (reports.Any())
+            {
+                foreach (var report in reports)
+                {
+                    var status = report.IsAdminReconciled ? "Reconciled" : "Pending";
+                    lines.Add($"{report.Date:yyyy-MM-dd} | {report.SummaryTotal.ToString("F2", CultureInfo.InvariantCulture)} | {report.ZReportTotal.ToString("F2", CultureInfo.InvariantCulture)} | {report.Variance.ToString("F2", CultureInfo.InvariantCulture)} | {status}");
+                }
+            }
+            else
+            {
+                lines.Add("No reconciliation records found for the selected range.");
+            }
+
+            var contentBuilder = new StringBuilder();
+            var y = 760;
+            foreach (var line in lines)
+            {
+                var escapedLine = EscapePdfText(line);
+                contentBuilder.AppendLine($"BT /F1 10 Tf 72 {y} Td ({escapedLine}) Tj ET");
+                y -= 12;
+            }
+
+            var content = contentBuilder.ToString();
+            var contentBytes = Encoding.ASCII.GetBytes(content);
+            var objects = new List<string>
+            {
+                "<< /Type /Catalog /Pages 2 0 R >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+                $"<< /Length {contentBytes.Length} >>\nstream\n{content}\nendstream",
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+            };
+
+            var pdf = new StringBuilder();
+            pdf.AppendLine("%PDF-1.4");
+            var offsets = new List<int>();
+
+            for (var i = 0; i < objects.Count; i++)
+            {
+                offsets.Add(pdf.Length);
+                pdf.AppendLine($"{i + 1} 0 obj");
+                pdf.AppendLine(objects[i]);
+                pdf.AppendLine("endobj");
+            }
+
+            var xrefPosition = pdf.Length;
+            pdf.AppendLine("xref");
+            pdf.AppendLine($"0 {objects.Count + 1}");
+            pdf.AppendLine("0000000000 65535 f ");
+
+            foreach (var offset in offsets)
+            {
+                pdf.AppendLine(offset.ToString("D10") + " 00000 n ");
+            }
+
+            pdf.AppendLine("trailer");
+            pdf.AppendLine($"<< /Size {objects.Count + 1} /Root 1 0 R >>");
+            pdf.AppendLine($"startxref\n{xrefPosition}\n%%EOF");
+
+            return Encoding.ASCII.GetBytes(pdf.ToString());
+        }
+
+        private static string EscapePdfText(string value) =>
+            value.Replace("\\", "\\\\")
+                .Replace("(", "\\(")
+                .Replace(")", "\\)");
 
         private static Dictionary<string, decimal> ParseZReportLines(string body)
         {
