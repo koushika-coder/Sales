@@ -13,6 +13,14 @@ using static YourApp.Services.SafeDropService;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Disable configuration file reload watchers to avoid Render/container file-descriptor limits.
+builder.Configuration.Sources.Clear();
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
+    .AddEnvironmentVariables()
+    .AddCommandLine(args);
+
 // Add services to the container.
 
 // Database
