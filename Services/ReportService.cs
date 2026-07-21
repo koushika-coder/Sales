@@ -129,7 +129,7 @@ namespace Sales.Services
         public async Task<byte[]> GenerateReportsPdfAsync(DateOnly? startDate, DateOnly? endDate)
         {
             var reports = await GetReportsAsync(startDate, endDate);
-            return BuildSimplePdf(reports, startDate, endDate);
+            return await BuildDetailedPdfAsync(reports, startDate, endDate);
         }
 
         // ── Full detail for a single date ────────────────────────────────────
@@ -294,29 +294,51 @@ namespace Sales.Services
         private static ReportFieldRow Row(string section, string field, decimal staff, decimal z) =>
             new() { Section = section, Field = field, StaffValue = staff, ZReportValue = z, Variance = staff - z };
 
-        private static byte[] BuildSimplePdf(IEnumerable<ReportListItem> reports, DateOnly? startDate, DateOnly? endDate)
+        private async Task<byte[]> BuildDetailedPdfAsync(IEnumerable<ReportListItem> reports, DateOnly? startDate, DateOnly? endDate)
         {
             var lines = new List<string>
             {
                 "Reconciliation Reports",
                 startDate.HasValue || endDate.HasValue
-                    ? $"Period: {(startDate?.ToString("yyyy-MM-dd") ?? "start")} to {(endDate?.ToString("yyyy-MM-dd") ?? "end")}" 
+                    ? $"Period: {(startDate?.ToString("yyyy-MM-dd") ?? "start")} to {(endDate?.ToString("yyyy-MM-dd") ?? "end")}"
                     : "All available records",
-                string.Empty,
-                "Date | Summary | Z-Report | Variance | Status"
+                string.Empty
             };
 
-            if (reports.Any())
+            if (!reports.Any())
+            {
+                lines.Add("No reconciliation records found for the selected range.");
+            }
+            else
             {
                 foreach (var report in reports)
                 {
                     var status = report.IsAdminReconciled ? "Reconciled" : "Pending";
-                    lines.Add($"{report.Date:yyyy-MM-dd} | {report.SummaryTotal.ToString("F2", CultureInfo.InvariantCulture)} | {report.ZReportTotal.ToString("F2", CultureInfo.InvariantCulture)} | {report.Variance.ToString("F2", CultureInfo.InvariantCulture)} | {status}");
+                    lines.Add($"Date: {report.Date:yyyy-MM-dd}");
+                    lines.Add($"Summary: {report.SummaryTotal.ToString("F2", CultureInfo.InvariantCulture)}");
+                    lines.Add($"Z-Report: {report.ZReportTotal.ToString("F2", CultureInfo.InvariantCulture)}");
+                    lines.Add($"Variance: {report.Variance.ToString("F2", CultureInfo.InvariantCulture)}");
+                    lines.Add($"Status: {status}");
+                    lines.Add(string.Empty);
+
+                    var detail = await GetReportByDateAsync(report.Date);
+                    if (detail is null || detail.Fields.Count == 0)
+                    {
+                        lines.Add("No detailed breakdown available.");
+                    }
+                    else
+                    {
+                        lines.Add("Breakdown:");
+                        foreach (var field in detail.Fields)
+                        {
+                            lines.Add($"- {field.Section} | {field.Field} | Staff: {field.StaffValue.ToString("F2", CultureInfo.InvariantCulture)} | Z: {field.ZReportValue.ToString("F2", CultureInfo.InvariantCulture)} | Variance: {field.Variance.ToString("F2", CultureInfo.InvariantCulture)}");
+                        }
+                    }
+
+                    lines.Add(string.Empty);
+                    lines.Add("------------------------------------------------------------");
+                    lines.Add(string.Empty);
                 }
-            }
-            else
-            {
-                lines.Add("No reconciliation records found for the selected range.");
             }
 
             var contentBuilder = new StringBuilder();
