@@ -312,6 +312,15 @@ namespace Sales.Services
             var lottery = await _context.LotteryMaster.FindAsync(id)
                 ?? throw new KeyNotFoundException("Scratch card not found.");
 
+            var inventoryRows = await _context.LotteryInventory
+                .Where(x => x.LotteryId == id)
+                .ToListAsync();
+
+            if (inventoryRows.Count > 0)
+            {
+                _context.LotteryInventory.RemoveRange(inventoryRows);
+            }
+
             _context.LotteryMaster.Remove(lottery);
             await _context.SaveChangesAsync();
         }
