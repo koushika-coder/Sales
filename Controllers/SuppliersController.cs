@@ -90,8 +90,13 @@ namespace Sales.Controllers
         // GET api/suppliers/invoices/dates
         // Date-wise summary: date, count of invoices, total value — all users
         [HttpGet("invoices/dates")]
-        public async Task<IActionResult> GetInvoiceDates() =>
-            Ok(await _service.GetInvoiceDatesAsync());
+        public async Task<IActionResult> GetInvoiceDates([FromQuery] DateOnly? startDate, [FromQuery] DateOnly? endDate)
+        {
+            if (startDate.HasValue && endDate.HasValue && endDate < startDate)
+                return BadRequest(new { message = "Start date must be on or before end date." });
+
+            return Ok(await _service.GetInvoiceDatesAsync(startDate, endDate));
+        }
 
         // GET api/suppliers/invoices/date/2026-06-12
         // All invoices for a specific date across all users, with supplier and user names
@@ -102,8 +107,14 @@ namespace Sales.Controllers
         // GET api/suppliers/invoices?date=2026-06-13
         // Date-picker friendly: pass ?date= to filter; omit for today's invoices (all users)
         [HttpGet("invoices")]
-        public async Task<IActionResult> GetInvoices([FromQuery] DateOnly? date)
+        public async Task<IActionResult> GetInvoices([FromQuery] DateOnly? date, [FromQuery] DateOnly? startDate, [FromQuery] DateOnly? endDate)
         {
+            if (startDate.HasValue && endDate.HasValue && endDate < startDate)
+                return BadRequest(new { message = "Start date must be on or before end date." });
+
+            if (startDate.HasValue || endDate.HasValue)
+                return Ok(await _service.GetInvoicesByRangeAsync(startDate, endDate));
+
             var target = date ?? DateOnly.FromDateTime(DateTime.Today);
             return Ok(await _service.GetInvoicesByDateAsync(target));
         }

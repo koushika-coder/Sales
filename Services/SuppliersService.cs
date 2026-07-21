@@ -137,9 +137,16 @@ namespace Sales.Services
             await _db.SaveChangesAsync();
         }
 
-        public async Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync()
+        public async Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync(DateOnly? startDate = null, DateOnly? endDate = null)
         {
-            return await _db.SupplierInvoices
+            var query = _db.SupplierInvoices.AsQueryable();
+
+            if (startDate.HasValue)
+                query = query.Where(i => DateOnly.FromDateTime(i.CreatedAt) >= startDate.Value);
+            if (endDate.HasValue)
+                query = query.Where(i => DateOnly.FromDateTime(i.CreatedAt) <= endDate.Value);
+
+            return await query
                 .GroupBy(i => DateOnly.FromDateTime(i.CreatedAt))
                 .Select(g => new InvoiceDateSummary
                 {
@@ -156,6 +163,28 @@ namespace Sales.Services
             var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var end   = start.AddDays(1);
 
+            return await GetInvoicesByRangeAsyncInternal(start, end);
+        }
+
+        public async Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByRangeAsync(DateOnly? startDate, DateOnly? endDate)
+        {
+            var start = startDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var end = endDate?.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+
+            if (start.HasValue && end.HasValue)
+                return await GetInvoicesByRangeAsyncInternal(start.Value, end.Value);
+
+            if (start.HasValue)
+                return await GetInvoicesByRangeAsyncInternal(start.Value, DateTime.MaxValue);
+
+            if (end.HasValue)
+                return await GetInvoicesByRangeAsyncInternal(DateTime.MinValue, end.Value);
+
+            return await GetInvoicesByRangeAsyncInternal(DateTime.UtcNow.AddDays(-30), DateTime.UtcNow);
+        }
+
+        private async Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByRangeAsyncInternal(DateTime start, DateTime end)
+        {
             var invoices = await _db.SupplierInvoices
                 .Include(i => i.Supplier)
                 .Where(i => i.CreatedAt >= start && i.CreatedAt < end)
@@ -189,7 +218,8 @@ namespace Sales.Services
         Task<IEnumerable<SupplierInvoiceResponse>> GetTodayInvoices(int userId);
         Task AddInvoice(int userId, AddSupplierInvoiceRequest request);
         Task DeleteInvoice(int userId, int invoiceId);
-        Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync();
+        Task<IEnumerable<InvoiceDateSummary>> GetInvoiceDatesAsync(DateOnly? startDate = null, DateOnly? endDate = null);
         Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByDateAsync(DateOnly date);
+        Task<IEnumerable<SupplierInvoiceResponse>> GetInvoicesByRangeAsync(DateOnly? startDate, DateOnly? endDate);
     }
 }
