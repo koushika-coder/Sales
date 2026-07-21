@@ -11,6 +11,10 @@ using static Sales.Services.LotteryInstanceService;
 using static Sales.Services.LotteryService;
 using static YourApp.Services.SafeDropService;
 
+// Disable configuration file watching before the host builder runs, which avoids Render/container file-descriptor limits.
+Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
+Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "false");
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Disable configuration file reload watchers to avoid Render/container file-descriptor limits.
