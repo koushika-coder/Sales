@@ -98,5 +98,25 @@ namespace Sales.Controllers
                 return NotFound(new { message = ex.Message });
             }
         }
+
+        // DELETE api/admin/lottery/scratch-cards/{id}
+        // Delete a scratch card from the admin list
+        [HttpDelete("scratch-cards/{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var role = User.FindFirst("role")?.Value;
+            if (role != "admin")
+                return StatusCode(403, new { message = "Only admins can register users." });
+
+            try
+            {
+                await _service.DeleteScratchCardAsync(id);
+                return Ok(new { message = "Scratch card deleted successfully." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
     }
 }

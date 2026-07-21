@@ -306,6 +306,15 @@ namespace Sales.Services
             lottery.IsActive = !lottery.IsActive;
             await _context.SaveChangesAsync();
         }
+
+        public async Task DeleteScratchCardAsync(int id)
+        {
+            var lottery = await _context.LotteryMaster.FindAsync(id)
+                ?? throw new KeyNotFoundException("Scratch card not found.");
+
+            _context.LotteryMaster.Remove(lottery);
+            await _context.SaveChangesAsync();
+        }
     }
 
     public interface ILotteryInstanceService
@@ -329,5 +338,6 @@ namespace Sales.Services
         Task SetOpenValueAsync(int lotteryId, int openValue);
         Task AddScratchCardAsync(AddScratchCardRequest request);
         Task ToggleScratchCardAsync(int id);
+        Task DeleteScratchCardAsync(int id);
     }
 }
