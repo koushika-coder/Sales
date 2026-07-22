@@ -113,13 +113,23 @@ namespace Sales.Services
             if (!supplierExists)
                 throw new KeyNotFoundException("Supplier not found.");
 
+            // Mirror SummaryService's recordAt logic: while yesterday is still uncommitted,
+            // "active date" is yesterday, and GetTodayInvoices queries yesterday's date
+            // window. Stamping with raw UtcNow would put the row in today's window instead,
+            // so it would never show up under /invoices/today until the day rolls over again.
+            var activeDate  = await GetActiveDateAsync();
+            var activeStart = activeDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var recordAt    = activeDate == DateOnly.FromDateTime(DateTime.UtcNow)
+                                ? DateTime.UtcNow
+                                : activeStart.AddHours(12);
+
             await _db.SupplierInvoices.AddAsync(new SupplierInvoice
             {
                 UserId = userId,
                 SupplierId = request.SupplierId,
                 InvoiceNo = request.InvoiceNo.Trim(),
                 Value = request.Value,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = recordAt,
             });
 
             await _db.SaveChangesAsync();
