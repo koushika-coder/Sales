@@ -13,6 +13,8 @@ public interface IAdminService
     Task<PaginatedResponse<AdminDto>> GetAllAdminsAsync(int pageNumber = 1, int pageSize = 10);
     Task<AdminDto?> UpdateAdminAsync(int adminId, string? name, string? department);
     Task<bool> DeleteAdminAsync(int adminId);
+    Task<bool> ActivateAdminAsync(int adminId);
+    Task<bool> HardDeleteAdminAsync(int adminId);
     Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
     Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService);
 }
@@ -70,7 +72,7 @@ public class AdminService : IAdminService
 
     public async Task<PaginatedResponse<AdminDto>> GetAllAdminsAsync(int pageNumber = 1, int pageSize = 10)
     {
-        var query = _context.Admins.Where(a => a.IsActive);
+        var query = _context.Admins.AsQueryable();
         var totalCount = await query.CountAsync();
         
         var admins = await query
@@ -114,6 +116,32 @@ public class AdminService : IAdminService
         admin.IsActive = false;
         admin.UpdatedAt = DateTime.UtcNow;
         _context.Admins.Update(admin);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> ActivateAdminAsync(int adminId)
+    {
+        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.AdminId == adminId);
+        if (admin == null)
+            return false;
+
+        admin.IsActive = true;
+        admin.UpdatedAt = DateTime.UtcNow;
+        _context.Admins.Update(admin);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> HardDeleteAdminAsync(int adminId)
+    {
+        var admin = await _context.Admins.FirstOrDefaultAsync(a => a.AdminId == adminId);
+        if (admin == null)
+            return false;
+
+        _context.Admins.Remove(admin);
         await _context.SaveChangesAsync();
 
         return true;

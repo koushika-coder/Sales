@@ -136,7 +136,7 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
-    /// Admin: Deactivate/Delete user
+    /// Admin: Deactivate user
     /// </summary>
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteUser(int id)
@@ -149,6 +149,40 @@ public class UsersController : ControllerBase
         if (!result)
             return NotFound(new { message = "User not found" });
 
-        return Ok(new { message = "User deleted successfully" });
+        return Ok(new { message = "User deactivated successfully" });
+    }
+
+    /// <summary>
+    /// Admin: Activate user
+    /// </summary>
+    [HttpPut("{id}/activate")]
+    public async Task<ActionResult> ActivateUser(int id)
+    {
+        var adminIdObj = HttpContext.Items["AdminId"];
+        if (adminIdObj == null)
+            return Unauthorized(new { message = "Admin not authenticated" });
+
+        var result = await _userService.ActivateUserAsync(id);
+        if (!result)
+            return NotFound(new { message = "User not found" });
+
+        return Ok(new { message = "User activated successfully" });
+    }
+
+    /// <summary>
+    /// Admin: Permanently delete user
+    /// </summary>
+    [HttpDelete("{id}/permanent")]
+    public async Task<ActionResult> HardDeleteUser(int id)
+    {
+        var adminIdObj = HttpContext.Items["AdminId"];
+        if (adminIdObj == null)
+            return Unauthorized(new { message = "Admin not authenticated" });
+
+        var result = await _userService.HardDeleteUserAsync(id);
+        if (!result)
+            return NotFound(new { message = "User not found" });
+
+        return Ok(new { message = "User permanently deleted" });
     }
 }

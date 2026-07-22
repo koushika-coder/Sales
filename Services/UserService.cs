@@ -15,6 +15,8 @@ public interface IUserService
     Task<PaginatedResponse<UserDto>> GetAllUsersAsync(int pageNumber = 1, int pageSize = 10);
     Task<UserDto?> UpdateUserAsync(int userId, string? name, string? department);
     Task<bool> DeleteUserAsync(int userId);
+    Task<bool> ActivateUserAsync(int userId);
+    Task<bool> HardDeleteUserAsync(int userId);
     Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService);
     Task<(bool Success, string? Error)> AdminResetPasswordAsync(string email, string newPassword, IAuthService authService);
     Task<UserDto?> GetUserByEmailAsync(string email);
@@ -79,7 +81,7 @@ public class UserService : IUserService
 
     public async Task<PaginatedResponse<UserDto>> GetAllUsersAsync(int pageNumber = 1, int pageSize = 10)
     {
-        var query = _context.Users.Where(u => u.IsActive);
+        var query = _context.Users.AsQueryable();
         var totalCount = await query.CountAsync();
         
         var users = await query
@@ -148,6 +150,32 @@ public class UserService : IUserService
         return true;
     }
 
+    public async Task<bool> ActivateUserAsync(int userId)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return false;
+
+        user.IsActive = true;
+        user.UpdatedAt = DateTime.UtcNow;
+        _context.Users.Update(user);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> HardDeleteUserAsync(int userId)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return false;
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     public async Task<(bool Success, string? Name, string? TempPassword, string? Error)> ForgotPasswordAsync(string email, IAuthService authService)
     {
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email && u.IsActive);
@@ -202,8 +230,7 @@ public class UserService : IUserService
             Name = user.Name,
             Role = user.Role,
             CreatedAt = user.CreatedAt,
-            IsActive = user.IsActive,
-            PasswordHash=user.PasswordHash
+            IsActive = user.IsActive
         };
     }
 }

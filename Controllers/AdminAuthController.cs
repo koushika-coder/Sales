@@ -183,7 +183,38 @@ public class AdminAuthController(
         if (!result)
             return NotFound(new { message = "Admin not found" });
 
-        return Ok(new { message = "Admin deleted successfully" });
+        return Ok(new { message = "Admin deactivated successfully" });
+    }
+
+    [HttpPut("{id}/activate")]
+    public async Task<ActionResult> ActivateAdmin(int id)
+    {
+        var adminRoleObj = HttpContext.Items["AdminRole"];
+
+        if (adminRoleObj?.ToString() != "admin")
+            return Forbid();
+
+        var result = await _adminService.ActivateAdminAsync(id);
+        if (!result)
+            return NotFound(new { message = "Admin not found" });
+
+        return Ok(new { message = "Admin activated successfully" });
+    }
+
+    [HttpDelete("{id}/permanent")]
+    public async Task<ActionResult> HardDeleteAdmin(int id)
+    {
+        var adminRoleObj = HttpContext.Items["AdminRole"];
+
+        // Only admins can permanently delete admins
+        if (adminRoleObj?.ToString() != "admin")
+            return Forbid();
+
+        var result = await _adminService.HardDeleteAdminAsync(id);
+        if (!result)
+            return NotFound(new { message = "Admin not found" });
+
+        return Ok(new { message = "Admin permanently deleted" });
     }
 }
 
