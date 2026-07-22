@@ -25,8 +25,7 @@ public class UsersController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<UserDto>> CreateStaff(CreateUserByAdminRequest request)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(request.Name))
@@ -93,8 +92,7 @@ public class UsersController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<UserDto>> GetUser(int id)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var user = await _userService.GetUserByIdAsync(id);
@@ -110,8 +108,7 @@ public class UsersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<UserDto>>> GetAllUsers([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var result = await _userService.GetAllUsersAsync(pageNumber, pageSize);
@@ -124,8 +121,7 @@ public class UsersController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<UserDto>> UpdateUser(int id, [FromBody] UpdateUserRequest request)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var user = await _userService.UpdateUserAsync(id, request.Name, request.Department);
@@ -141,8 +137,7 @@ public class UsersController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteUser(int id)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var result = await _userService.DeleteUserAsync(id);
@@ -158,8 +153,7 @@ public class UsersController : ControllerBase
     [HttpPut("{id}/activate")]
     public async Task<ActionResult> ActivateUser(int id)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var result = await _userService.ActivateUserAsync(id);
@@ -175,8 +169,7 @@ public class UsersController : ControllerBase
     [HttpDelete("{id}/permanent")]
     public async Task<ActionResult> HardDeleteUser(int id)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        if (adminIdObj == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Unauthorized(new { message = "Admin not authenticated" });
 
         var result = await _userService.HardDeleteUserAsync(id);

@@ -59,7 +59,7 @@ public class AdminAuthController(
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] AdminResetAdminPasswordRequest request)
     {
-        if (HttpContext.Items["AdminId"] == null)
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         if (string.IsNullOrWhiteSpace(request.Email))
@@ -121,14 +121,8 @@ public class AdminAuthController(
     [HttpGet("{id}")]
     public async Task<ActionResult<AdminDto>> GetAdmin(int id)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-
-        if (adminIdObj == null)
-            return Unauthorized(new { message = "Admin not authenticated" });
-
         // Only allow admins to view other admins
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var admin = await _adminService.GetAdminByIdAsync(id);
@@ -141,10 +135,8 @@ public class AdminAuthController(
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<AdminDto>>> GetAllAdmins([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
     {
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-        
         // Only admins can list all admins
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var result = await _adminService.GetAllAdminsAsync(pageNumber, pageSize);
@@ -154,13 +146,7 @@ public class AdminAuthController(
     [HttpPut("{id}")]
     public async Task<ActionResult<AdminDto>> UpdateAdmin(int id, [FromBody] UpdateAdminRequest request)
     {
-        var adminIdObj = HttpContext.Items["AdminId"];
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-
-        if (adminIdObj == null)
-            return Unauthorized(new { message = "Admin not authenticated" });
-
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var admin = await _adminService.UpdateAdminAsync(id, request.Name, request.Department);
@@ -173,10 +159,8 @@ public class AdminAuthController(
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteAdmin(int id)
     {
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-
         // Only admins can delete admins
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var result = await _adminService.DeleteAdminAsync(id);
@@ -189,9 +173,7 @@ public class AdminAuthController(
     [HttpPut("{id}/activate")]
     public async Task<ActionResult> ActivateAdmin(int id)
     {
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var result = await _adminService.ActivateAdminAsync(id);
@@ -204,10 +186,8 @@ public class AdminAuthController(
     [HttpDelete("{id}/permanent")]
     public async Task<ActionResult> HardDeleteAdmin(int id)
     {
-        var adminRoleObj = HttpContext.Items["AdminRole"];
-
         // Only admins can permanently delete admins
-        if (adminRoleObj?.ToString() != "admin")
+        if (User.FindFirst("role")?.Value != "admin")
             return Forbid();
 
         var result = await _adminService.HardDeleteAdminAsync(id);
