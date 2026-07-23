@@ -96,6 +96,7 @@ namespace Sales.Services
                     NewsVoucher = r.NewsVoucher,
                     DDPoint = r.DDPoint,
                     LotteryPayout = r.LotteryPayout,
+                    SupplierInvoicesTotal = r.SupplierInvoicesTotal,
                     InstantLotteryTotalCount = r.InstantLotteryTotalCount,
                     InstantLotteryTotalSales = r.InstantLotteryTotalSales,
                     LotteryValue = r.LotteryValue,
@@ -177,8 +178,12 @@ namespace Sales.Services
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
 
+            var supplierInvoicesTotal = await _db.SupplierInvoices
+                .Where(i => i.CreatedAt >= rangeStart && i.CreatedAt < rangeEnd)
+                .SumAsync(i => (decimal?)i.Value) ?? 0m;
+
             var cash         = lastSafe + safeDropAmount;
-            var summaryTotal = manualCard + cardAmount + cash;
+            var summaryTotal = manualCard + cardAmount + cash + supplierInvoicesTotal;
             var zReportTotal = await _gmail.GetZReportTotalForDateAsync(date) ?? 0m;
 
             return new PendingReconciliationResponse
@@ -196,6 +201,7 @@ namespace Sales.Services
                 NewsVoucher = deduction?.NewsVoucher ?? 0m,
                 DDPoint = deduction?.DDPoint ?? 0m,
                 LotteryPayout = deduction?.LotteryPayout ?? 0m,
+                SupplierInvoicesTotal = supplierInvoicesTotal,
                 InstantLotteryTotalCount = ilCount,
                 InstantLotteryTotalSales = ilSales,
                 LotteryValue = lottery?.LotteryValue ?? 0m,
@@ -233,6 +239,7 @@ namespace Sales.Services
             existing.NewsVoucher = request.NewsVoucher;
             existing.DDPoint = request.DDPoint;
             existing.LotteryPayout = request.LotteryPayout;
+            existing.SupplierInvoicesTotal = request.SupplierInvoicesTotal;
             existing.LotteryValue = request.LotteryValue;
             existing.PaypointValue = request.PaypointValue;
             existing.SummaryTotal = request.SummaryTotal;
@@ -264,6 +271,7 @@ namespace Sales.Services
                 NewsVoucher = existing.NewsVoucher,
                 DDPoint = existing.DDPoint,
                 LotteryPayout = existing.LotteryPayout,
+                SupplierInvoicesTotal = existing.SupplierInvoicesTotal,
                 InstantLotteryTotalCount = 0,
                 InstantLotteryTotalSales = existing.InstantLotteryTotalSales,
                 LotteryValue = existing.LotteryValue,
@@ -354,6 +362,7 @@ namespace Sales.Services
                     NewsVoucher              = adminRec.NewsVoucher,
                     DDPoint                  = adminRec.DDPoint,
                     LotteryPayout            = adminRec.LotteryPayout,
+                    SupplierInvoicesTotal    = adminRec.SupplierInvoicesTotal,
                     InstantLotteryTotalCount = adminRec.InstantLotteryTotalCount,
                     InstantLotteryTotalSales = adminRec.InstantLotteryTotalSales,
                     LotteryValue             = adminRec.LotteryValue,
@@ -406,6 +415,11 @@ namespace Sales.Services
                 .OrderByDescending(p => p.CreatedDate)
                 .FirstOrDefaultAsync();
 
+            var liveSupplierInvoicesTotal = await _db.SupplierInvoices
+                .Where(i => i.CreatedAt >= rangeStart && i.CreatedAt < rangeEnd)
+                .SumAsync(i => (decimal?)i.Value) ?? 0m;
+            var supplierInvoicesTotal = adminPatch?.SupplierInvoicesTotal ?? liveSupplierInvoicesTotal;
+
             return new CommittedSummaryDetailResponse
             {
                 CommitId                 = commit.Id,
@@ -420,6 +434,7 @@ namespace Sales.Services
                 NewsVoucher              = deduction?.NewsVoucher           ?? 0m,
                 DDPoint                  = deduction?.DDPoint               ?? 0m,
                 LotteryPayout            = deduction?.LotteryPayout         ?? 0m,
+                SupplierInvoicesTotal    = supplierInvoicesTotal,
                 InstantLotteryTotalCount = ilCount,
                 InstantLotteryTotalSales = ilSales,
                 LotteryValue             = lottery?.LotteryValue   ?? 0m,
@@ -457,6 +472,7 @@ namespace Sales.Services
                 NewsVoucher = record.NewsVoucher,
                 DDPoint = record.DDPoint,
                 LotteryPayout = record.LotteryPayout,
+                SupplierInvoicesTotal = record.SupplierInvoicesTotal,
                 InstantLotteryTotalCount = record.InstantLotteryTotalCount,
                 InstantLotteryTotalSales = record.InstantLotteryTotalSales,
                 LotteryValue = record.LotteryValue,

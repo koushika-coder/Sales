@@ -24,6 +24,7 @@ namespace Sales.DTOs
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
         public decimal LotteryPayout { get; set; }
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Instant Lottery
         public int InstantLotteryTotalCount { get; set; }
@@ -74,6 +75,7 @@ namespace Sales.DTOs
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
         public decimal LotteryPayout { get; set; }
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Instant Lottery
         public int InstantLotteryTotalCount { get; set; }
@@ -110,6 +112,7 @@ namespace Sales.DTOs
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
         public decimal LotteryPayout { get; set; }
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Lottery / Paypoint
         public decimal LotteryValue { get; set; }
@@ -145,6 +148,7 @@ namespace Sales.DTOs
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
         public decimal LotteryPayout { get; set; }
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Instant Lottery
         public int InstantLotteryTotalCount { get; set; }
@@ -203,6 +207,10 @@ namespace Sales.DTOs
         // Instant Lottery Inventory — computed sums, read-only
         public int InstantLotteryTotalCount { get; set; }   // total scratch cards sold
         public decimal InstantLotteryTotalSales { get; set; } // total £ value sold
+
+        // Supplier Payout — computed live sum of that day's Supplier Invoices, read-only
+        // (the underlying invoices are entered on the Deductions page).
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Lottery Management
         public decimal LotteryValue { get; set; }

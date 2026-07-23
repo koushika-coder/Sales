@@ -196,6 +196,7 @@ namespace Sales.Services
                         {Row("Deductions",  "News Voucher",           data.NewsVoucher)}
                         {Row("Deductions",  "DD Point",               data.DDPoint)}
                         {Row("Deductions",  "Lottery Payout",         data.LotteryPayout)}
+                        {Row("Supplier",    "Supplier Payout",        data.SupplierInvoicesTotal)}
                         {Row("Lottery",     "Lottery Value",          data.LotteryValue)}
                         {Row("Paypoint",    "Paypoint Value",         data.PaypointValue)}
                     </tbody>

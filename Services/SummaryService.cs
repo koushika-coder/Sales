@@ -171,12 +171,17 @@ namespace Sales.Services
             var hasInventoryToday = await _db.LotteryInventory
                 .AnyAsync(li => li.InventoryDate >= start && li.InventoryDate < end);
 
+            var supplierInvoicesTotal = await _db.SupplierInvoices
+                .Where(i => i.CreatedAt >= start && i.CreatedAt < end)
+                .SumAsync(i => (decimal?)i.Value) ?? 0m;
+
             var hasTodayData = deduction != null
                 || safeDrop != null
                 || creditCardEntries.Any()
                 || hasInventoryToday
                 || lottery != null
-                || paypoint != null;
+                || paypoint != null
+                || supplierInvoicesTotal > 0m;
 
             // null (not 0) when no SafeDrop record exists yet — lets the frontend tell
             // "not entered" apart from a genuinely saved zero.
@@ -198,6 +203,7 @@ namespace Sales.Services
                 LotteryPayout = deduction?.LotteryPayout ?? 0m,
                 InstantLotteryTotalCount = instantLotteryTotalCount,
                 InstantLotteryTotalSales = instantLotteryTotalSales,
+                SupplierInvoicesTotal = supplierInvoicesTotal,
                 LotteryValue = lottery?.LotteryValue ?? 0m,
                 PaypointValue = paypoint?.PaypointValue ?? 0m,
                 IsCommitted = commit is not null,

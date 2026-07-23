@@ -20,6 +20,7 @@ namespace Sales.Models
         public decimal NewsVoucher { get; set; }
         public decimal DDPoint { get; set; }
         public decimal LotteryPayout { get; set; }
+        public decimal SupplierInvoicesTotal { get; set; }
 
         // Instant Lottery
         public int InstantLotteryTotalCount { get; set; }

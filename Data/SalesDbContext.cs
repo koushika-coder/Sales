@@ -342,6 +342,7 @@ public class SalesDbContext : DbContext
             entity.Property(e => e.NewsVoucher).HasPrecision(18, 2);
             entity.Property(e => e.DDPoint).HasPrecision(18, 2);
             entity.Property(e => e.LotteryPayout).HasPrecision(18, 2);
+            entity.Property(e => e.SupplierInvoicesTotal).HasPrecision(18, 2);
             entity.Property(e => e.InstantLotteryTotalSales).HasPrecision(18, 2);
             entity.Property(e => e.LotteryValue).HasPrecision(18, 2);
             entity.Property(e => e.PaypointValue).HasPrecision(18, 2);
