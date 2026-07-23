@@ -10,22 +10,21 @@ namespace Sales.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<decimal>(
-                name: "SupplierInvoicesTotal",
-                table: "AdminReconciliations",
-                type: "numeric(18,2)",
-                precision: 18,
-                scale: 2,
-                nullable: false,
-                defaultValue: 0m);
+            // IF NOT EXISTS guards against re-running on a database where a previous,
+            // interrupted deploy already applied this column but didn't get to record
+            // the migration in __EFMigrationsHistory (Postgres-specific syntax — fine
+            // since this project only targets Postgres).
+            migrationBuilder.Sql(
+                @"ALTER TABLE ""AdminReconciliations"" " +
+                @"ADD COLUMN IF NOT EXISTS ""SupplierInvoicesTotal"" numeric(18,2) NOT NULL DEFAULT 0.0;");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "SupplierInvoicesTotal",
-                table: "AdminReconciliations");
+            migrationBuilder.Sql(
+                @"ALTER TABLE ""AdminReconciliations"" " +
+                @"DROP COLUMN IF EXISTS ""SupplierInvoicesTotal"";");
         }
     }
 }
