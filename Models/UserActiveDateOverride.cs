@@ -9,8 +9,7 @@ namespace Sales.Models
         [Key]
         public int Id { get; set; }
 
-        public int UserId { get; set; }
-
+        // Shop-wide override — at most one row ever exists.
         public DateOnly ActiveDate { get; set; }
 
         public DateTime SetAt { get; set; } = DateTime.UtcNow;

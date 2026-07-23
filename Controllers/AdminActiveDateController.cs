@@ -15,27 +15,12 @@ namespace Sales.Controllers
 
         public AdminActiveDateController(SalesDbContext db) => _db = db;
 
-        // GET api/admin/active-date/users
-        // Returns all active (non-deleted) user accounts for the admin to choose from.
-        [HttpGet("users")]
-        public async Task<IActionResult> GetUsers()
+        // GET api/admin/active-date
+        // Returns the current shop-wide active-date override, or null if none.
+        [HttpGet]
+        public async Task<IActionResult> GetOverride()
         {
-            var users = await _db.Users
-                .Where(u => u.IsActive && u.Role == "user")
-                .OrderBy(u => u.Name)
-                .Select(u => new { u.Id, u.Name, u.Email })
-                .ToListAsync();
-
-            return Ok(users);
-        }
-
-        // GET api/admin/active-date/{userId}
-        // Returns the current active-date override for a user, or null if none.
-        [HttpGet("{userId:int}")]
-        public async Task<IActionResult> GetOverride(int userId)
-        {
-            var ovr = await _db.UserActiveDateOverrides
-                .FirstOrDefaultAsync(o => o.UserId == userId);
+            var ovr = await _db.UserActiveDateOverrides.FirstOrDefaultAsync();
 
             if (ovr is null)
                 return Ok(new { hasOverride = false, activeDate = (string?)null });
@@ -44,22 +29,16 @@ namespace Sales.Controllers
         }
 
         // POST api/admin/active-date
-        // Sets (or replaces) the active-date override for a user.
+        // Sets (or replaces) the shop-wide active-date override.
         [HttpPost]
         public async Task<IActionResult> SetOverride([FromBody] SetActiveDateRequest request)
         {
-            var userExists = await _db.Users.AnyAsync(u => u.Id == request.UserId && u.IsActive);
-            if (!userExists)
-                return NotFound(new { message = "User not found." });
-
-            var existing = await _db.UserActiveDateOverrides
-                .FirstOrDefaultAsync(o => o.UserId == request.UserId);
+            var existing = await _db.UserActiveDateOverrides.FirstOrDefaultAsync();
 
             if (existing is null)
             {
                 _db.UserActiveDateOverrides.Add(new UserActiveDateOverride
                 {
-                    UserId     = request.UserId,
                     ActiveDate = request.ActiveDate,
                     SetAt      = DateTime.UtcNow,
                 });
@@ -71,19 +50,18 @@ namespace Sales.Controllers
             }
 
             await _db.SaveChangesAsync();
-            return Ok(new { message = $"Active date for user {request.UserId} set to {request.ActiveDate:dd-MM-yyyy}." });
+            return Ok(new { message = $"Active date set to {request.ActiveDate:dd-MM-yyyy} for all users." });
         }
 
-        // DELETE api/admin/active-date/{userId}
-        // Removes the active-date override, returning the user to automatic date logic.
-        [HttpDelete("{userId:int}")]
-        public async Task<IActionResult> ClearOverride(int userId)
+        // DELETE api/admin/active-date
+        // Removes the shop-wide active-date override, returning everyone to automatic date logic.
+        [HttpDelete]
+        public async Task<IActionResult> ClearOverride()
         {
-            var ovr = await _db.UserActiveDateOverrides
-                .FirstOrDefaultAsync(o => o.UserId == userId);
+            var ovr = await _db.UserActiveDateOverrides.FirstOrDefaultAsync();
 
             if (ovr is null)
-                return Ok(new { message = "No override was set for this user." });
+                return Ok(new { message = "No override was set." });
 
             _db.UserActiveDateOverrides.Remove(ovr);
             await _db.SaveChangesAsync();
@@ -93,7 +71,6 @@ namespace Sales.Controllers
 
     public class SetActiveDateRequest
     {
-        public int UserId { get; set; }
         public DateOnly ActiveDate { get; set; }
     }
 }

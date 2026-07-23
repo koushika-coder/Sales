@@ -30,12 +30,12 @@ namespace Sales.Services
         }
 
         // Returns yesterday if yesterday is uncommitted (by staff or admin), otherwise today.
-        // If an admin has set an active-date override for this user, that takes priority
-        // (and is automatically cleared once that date becomes committed).
+        // If an admin has set a shop-wide active-date override, that takes priority for
+        // every user (and is automatically cleared once that date becomes committed).
         private async Task<DateOnly> GetActiveDateAsync(int userId)
         {
-            var ovr = await _db.UserActiveDateOverrides
-                .FirstOrDefaultAsync(o => o.UserId == userId);
+            // Shop-wide override — not scoped to a particular user.
+            var ovr = await _db.UserActiveDateOverrides.FirstOrDefaultAsync();
 
             if (ovr is not null)
             {

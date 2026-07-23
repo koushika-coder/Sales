@@ -20,8 +20,8 @@ namespace Sales.Services
 
         private async Task<(DateOnly activeDate, DateTime start, DateTime end, DateTime recordAt)> GetActiveDateRangeAsync(int userId)
         {
-            // 1. Admin override takes priority.
-            var ovr = await _context.UserActiveDateOverrides.FirstOrDefaultAsync(o => o.UserId == userId);
+            // 1. Shop-wide admin override takes priority.
+            var ovr = await _context.UserActiveDateOverrides.FirstOrDefaultAsync();
             if (ovr is not null)
             {
                 if (await IsDateCommittedAsync(userId, ovr.ActiveDate))
