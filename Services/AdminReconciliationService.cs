@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Sales.Data;
 using Sales.DTOs;
 using Sales.Models;
+using System.IO.Compression;
+using System.Text;
 
 namespace Sales.Services
 {
@@ -21,6 +23,13 @@ namespace Sales.Services
 
         // Staff portal: yesterday's admin-submitted reconciliation
         Task<ReconciliationPortalResponse?> GetPortalReconciliationAsync(DateOnly? date = null);
+
+        // Download the Z-report bill (Gmail email) for one date as a PDF.
+        // Null means no matching Z-report email was found for that date.
+        Task<(string FileName, byte[] Bytes)?> DownloadZReportBillAsync(DateOnly date);
+
+        // Download bills for a date range as a single ZIP (one PDF per date found).
+        Task<(string FileName, byte[] Bytes)> DownloadZReportBillsRangeAsync(DateOnly fromDate, DateOnly toDate);
     }
 
     public class AdminReconciliationService : IAdminReconciliationService
@@ -459,5 +468,180 @@ namespace Sales.Services
                 SubmittedAt = record.SubmittedAt!.Value,
             };
         }
+
+        // ── Download bill (Z-report Gmail email → PDF) ──────────────────────
+
+        public async Task<(string FileName, byte[] Bytes)?> DownloadZReportBillAsync(DateOnly date)
+        {
+            var email = await FindZReportEmailForDateAsync(date);
+            if (email is null) return null;
+
+            var bytes = BuildBillPdf(date, email);
+            return ($"zreport-bill-{date:yyyy-MM-dd}.pdf", bytes);
+        }
+
+        public async Task<(string FileName, byte[] Bytes)> DownloadZReportBillsRangeAsync(DateOnly fromDate, DateOnly toDate)
+        {
+            using var zipStream = new MemoryStream();
+            using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                for (var date = fromDate; date <= toDate; date = date.AddDays(1))
+                {
+                    var email = await FindZReportEmailForDateAsync(date);
+                    if (email is null) continue; // no bill for this date — skip, don't fail the batch
+
+                    var bytes = BuildBillPdf(date, email);
+                    var entry = archive.CreateEntry($"{date:yyyy-MM-dd}.pdf", CompressionLevel.Optimal);
+                    using var entryStream = entry.Open();
+                    await entryStream.WriteAsync(bytes);
+                }
+            }
+
+            var fileName = $"zreport-bills-{fromDate:yyyy-MM-dd}-to-{toDate:yyyy-MM-dd}.zip";
+            return (fileName, zipStream.ToArray());
+        }
+
+        // Finds the Z-report email for a date regardless of commit status — an admin
+        // downloading a historical bill should be able to get it whether or not the
+        // day has since been committed (unlike the staff-facing Z-Report Viewer).
+        private async Task<GmailMessageResponse?> FindZReportEmailForDateAsync(DateOnly date)
+        {
+            var emails = await _gmail.GetEmailsAsync(new GmailRequest
+            {
+                SubjectKeyword = "Z-Report",
+                MaxResults     = 50,
+            });
+
+            return emails.FirstOrDefault(e =>
+                !e.Body.TrimStart().StartsWith('<') &&
+                e.Body.Contains("GRAND TOTAL", StringComparison.OrdinalIgnoreCase) &&
+                ParseEmailReceivedDate(e.Date) == date);
+        }
+
+        // Parses the RFC 2822 "Date" header of an email and returns the date in the
+        // timezone the sender used — this is the date the user sees in their inbox.
+        private static DateOnly? ParseEmailReceivedDate(string emailDate)
+        {
+            if (string.IsNullOrWhiteSpace(emailDate)) return null;
+            if (DateTimeOffset.TryParse(
+                    emailDate,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out var dto))
+                return DateOnly.FromDateTime(dto.DateTime);
+            return null;
+        }
+
+        // Builds a simple multi-page PDF (no external library, matches the hand-rolled
+        // approach ReportService uses) from the email's subject + plain-text body.
+        private static byte[] BuildBillPdf(DateOnly date, GmailMessageResponse email)
+        {
+            const int maxCharsPerLine = 100;
+
+            var lines = new List<string>
+            {
+                $"Z-Report Bill - {date:yyyy-MM-dd}",
+                $"Subject: {email.Subject}",
+                string.Empty,
+            };
+
+            foreach (var rawLine in email.Body.Replace("\r\n", "\n").Split('\n'))
+            {
+                lines.AddRange(WrapLine(rawLine, maxCharsPerLine));
+            }
+
+            return BuildMultiPagePdf(lines);
+        }
+
+        private static List<string> WrapLine(string line, int maxChars)
+        {
+            if (string.IsNullOrEmpty(line) || line.Length <= maxChars)
+                return new List<string> { line };
+
+            var wrapped = new List<string>();
+            for (var i = 0; i < line.Length; i += maxChars)
+                wrapped.Add(line.Substring(i, Math.Min(maxChars, line.Length - i)));
+            return wrapped;
+        }
+
+        private static byte[] BuildMultiPagePdf(IReadOnlyList<string> lines)
+        {
+            const int linesPerPage = 60;
+            const int startY = 760;
+            const int lineHeight = 12;
+
+            var pageContents = new List<string>();
+            for (var i = 0; i < lines.Count; i += linesPerPage)
+            {
+                var y = startY;
+                var sb = new StringBuilder();
+                foreach (var line in lines.Skip(i).Take(linesPerPage))
+                {
+                    sb.AppendLine($"BT /F1 10 Tf 72 {y} Td ({EscapePdfText(line)}) Tj ET");
+                    y -= lineHeight;
+                }
+                pageContents.Add(sb.ToString());
+            }
+            if (pageContents.Count == 0) pageContents.Add(string.Empty);
+
+            var pageCount = pageContents.Count;
+            const int pageObjStart = 3;
+            var contentObjStart = pageObjStart + pageCount;
+            var fontObjNum = contentObjStart + pageCount;
+
+            var kids = string.Join(" ", Enumerable.Range(pageObjStart, pageCount).Select(n => $"{n} 0 R"));
+
+            var objects = new List<string>
+            {
+                "<< /Type /Catalog /Pages 2 0 R >>",
+                $"<< /Type /Pages /Kids [{kids}] /Count {pageCount} >>",
+            };
+
+            for (var p = 0; p < pageCount; p++)
+            {
+                objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentObjStart + p} 0 R /Resources << /Font << /F1 {fontObjNum} 0 R >> >> >>");
+            }
+
+            for (var p = 0; p < pageCount; p++)
+            {
+                var contentBytes = Encoding.ASCII.GetBytes(pageContents[p]);
+                objects.Add($"<< /Length {contentBytes.Length} >>\nstream\n{pageContents[p]}\nendstream");
+            }
+
+            objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+            var pdf = new StringBuilder();
+            pdf.AppendLine("%PDF-1.4");
+            var offsets = new List<int>();
+
+            for (var i = 0; i < objects.Count; i++)
+            {
+                offsets.Add(pdf.Length);
+                pdf.AppendLine($"{i + 1} 0 obj");
+                pdf.AppendLine(objects[i]);
+                pdf.AppendLine("endobj");
+            }
+
+            var xrefPosition = pdf.Length;
+            pdf.AppendLine("xref");
+            pdf.AppendLine($"0 {objects.Count + 1}");
+            pdf.AppendLine("0000000000 65535 f ");
+
+            foreach (var offset in offsets)
+            {
+                pdf.AppendLine(offset.ToString("D10") + " 00000 n ");
+            }
+
+            pdf.AppendLine("trailer");
+            pdf.AppendLine($"<< /Size {objects.Count + 1} /Root 1 0 R >>");
+            pdf.AppendLine($"startxref\n{xrefPosition}\n%%EOF");
+
+            return Encoding.ASCII.GetBytes(pdf.ToString());
+        }
+
+        private static string EscapePdfText(string value) =>
+            value.Replace("\\", "\\\\")
+                .Replace("(", "\\(")
+                .Replace(")", "\\)");
     }
 }

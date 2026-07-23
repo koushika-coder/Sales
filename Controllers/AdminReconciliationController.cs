@@ -113,5 +113,37 @@ namespace Sales.Controllers
 
             return Ok(result);
         }
+
+        // GET api/admin/reconciliation/download-bill?date=2026-07-05
+        [HttpGet("download-bill")]
+        public async Task<IActionResult> DownloadBill([FromQuery] DateOnly date)
+        {
+            var role = User.FindFirst("role")?.Value;
+            if (role != "admin")
+                return StatusCode(403, new { message = "Only admins can download bills." });
+
+            var result = await _service.DownloadZReportBillAsync(date);
+            if (result is null)
+                return NotFound(new { message = $"No Z-report bill found for {date:dd-MM-yyyy}." });
+
+            return File(result.Value.Bytes, "application/pdf", result.Value.FileName);
+        }
+
+        // GET api/admin/reconciliation/download-bills-range?fromDate=2026-07-01&toDate=2026-07-05
+        [HttpGet("download-bills-range")]
+        public async Task<IActionResult> DownloadBillsRange(
+            [FromQuery] DateOnly fromDate,
+            [FromQuery] DateOnly toDate)
+        {
+            var role = User.FindFirst("role")?.Value;
+            if (role != "admin")
+                return StatusCode(403, new { message = "Only admins can download bills." });
+
+            if (fromDate > toDate)
+                return BadRequest(new { message = "fromDate must be on or before toDate." });
+
+            var (fileName, bytes) = await _service.DownloadZReportBillsRangeAsync(fromDate, toDate);
+            return File(bytes, "application/zip", fileName);
+        }
     }
 }
