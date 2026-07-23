@@ -203,6 +203,23 @@ namespace Sales.Services
             await _context.SaveChangesAsync();
         }
 
+        public async Task DeleteTodayInventory(int userId, int lotteryId)
+        {
+            var (activeStart, activeEnd) = await GetActiveDateRangeAsync(userId);
+
+            var existingRecord = await _context.LotteryInventory
+                .FirstOrDefaultAsync(x =>
+                    x.LotteryId == lotteryId &&
+                    x.InventoryDate >= activeStart &&
+                    x.InventoryDate < activeEnd);
+
+            if (existingRecord == null)
+                return;
+
+            _context.LotteryInventory.Remove(existingRecord);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task UpdateInventory(
             int userId,
             UpdateLotteryInventoryRequest request)
@@ -337,6 +354,8 @@ namespace Sales.Services
         Task SaveInventory(
             int userId,
             LotteryInventorySaveRequest request);
+
+        Task DeleteTodayInventory(int userId, int lotteryId);
 
         Task UpdateInventory(
             int userId,

@@ -53,6 +53,23 @@ namespace Sales.Controllers
             var updated = await _service.GetTodayInventory(userId);
             return Ok(updated);
         }
+        [HttpDelete("today/{lotteryId}")]
+        public async Task<IActionResult> DeleteToday(int lotteryId)
+        {
+            var userIdClaim = User.FindFirst("Id")?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim))
+                return Unauthorized();
+
+            int userId = int.Parse(userIdClaim);
+
+            await _service.DeleteTodayInventory(userId, lotteryId);
+
+            // Return the full updated list so the UI reflects the reset row without an extra GET
+            var updated = await _service.GetTodayInventory(userId);
+            return Ok(updated);
+        }
+
         [HttpGet("report")]
         public async Task<IActionResult> GetReport()
         {
