@@ -14,16 +14,37 @@ namespace Sales.Services
             _context = context;
         }
 
-        // Same active-date logic as SummaryService / DeductionsService.
+        private async Task<bool> IsDateCommittedAsync(DateOnly date) =>
+            await _context.SummaryCommits.AnyAsync(c => c.Date == date) ||
+            await _context.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
+
+        // Same active-date logic as SummaryService / DeductionsService — including the
+        // shop-wide admin override, which this was previously missing. Without it,
+        // Instant Lottery entries were saved/read against a different date than every
+        // other module whenever an admin had set an active-date override, so they'd
+        // silently fall outside the date window Summary queries.
         private async Task<(DateTime start, DateTime end)> GetActiveDateRangeAsync(int userId)
         {
+            var ovr = await _context.UserActiveDateOverrides.FirstOrDefaultAsync();
+            if (ovr is not null)
+            {
+                if (await IsDateCommittedAsync(ovr.ActiveDate))
+                {
+                    _context.UserActiveDateOverrides.Remove(ovr);
+                    await _context.SaveChangesAsync();
+                }
+                else
+                {
+                    var overrideStart = ovr.ActiveDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                    return (overrideStart, overrideStart.AddDays(1));
+                }
+            }
+
             var todayUtc     = DateOnly.FromDateTime(DateTime.UtcNow);
             var yesterdayUtc = todayUtc.AddDays(-1);
 
             // If today is already committed, move to tomorrow.
-            var todayCommitted =
-                await _context.SummaryCommits.AnyAsync(c => c.Date == todayUtc) ||
-                await _context.AdminReconciliations.AnyAsync(r => r.Date == todayUtc && r.Status == "submitted");
+            var todayCommitted = await IsDateCommittedAsync(todayUtc);
 
             DateOnly activeDate;
             if (todayCommitted)
@@ -32,9 +53,7 @@ namespace Sales.Services
             }
             else
             {
-                var yesterdayCommitted =
-                    await _context.SummaryCommits.AnyAsync(c => c.Date == yesterdayUtc) ||
-                    await _context.AdminReconciliations.AnyAsync(r => r.Date == yesterdayUtc && r.Status == "submitted");
+                var yesterdayCommitted = await IsDateCommittedAsync(yesterdayUtc);
                 activeDate = yesterdayCommitted ? todayUtc : yesterdayUtc;
             }
 

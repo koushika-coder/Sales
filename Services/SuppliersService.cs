@@ -62,23 +62,39 @@ namespace Sales.Services
             await _db.SaveChangesAsync();
         }
 
+        private async Task<bool> IsDateCommittedAsync(DateOnly date) =>
+            await _db.SummaryCommits.AnyAsync(c => c.Date == date) ||
+            await _db.AdminReconciliations.AnyAsync(r => r.Date == date && r.Status == "submitted");
+
         // "Active date" mirrors SummaryService.GetActiveDateAsync — yesterday while it's
         // still uncommitted, otherwise today — so invoices saved while working on an
         // uncommitted day actually show up under that day instead of literal calendar
         // "today" (DateTime.Today was also server-local, not UTC, compounding the bug).
+        // Also honours the shop-wide admin active-date override, same as every other
+        // module — this was missing before, which let invoices land on a different
+        // date than the rest of the day's data whenever an override was active.
         private async Task<DateOnly> GetActiveDateAsync()
         {
+            var ovr = await _db.UserActiveDateOverrides.FirstOrDefaultAsync();
+            if (ovr is not null)
+            {
+                if (await IsDateCommittedAsync(ovr.ActiveDate))
+                {
+                    _db.UserActiveDateOverrides.Remove(ovr);
+                    await _db.SaveChangesAsync();
+                }
+                else
+                {
+                    return ovr.ActiveDate;
+                }
+            }
+
             var today     = DateOnly.FromDateTime(DateTime.UtcNow);
             var yesterday = today.AddDays(-1);
 
-            var todayCommitted =
-                await _db.SummaryCommits.AnyAsync(c => c.Date == today) ||
-                await _db.AdminReconciliations.AnyAsync(r => r.Date == today && r.Status == "submitted");
-            if (todayCommitted) return today.AddDays(1);
+            if (await IsDateCommittedAsync(today)) return today.AddDays(1);
 
-            var yesterdayCommitted =
-                await _db.SummaryCommits.AnyAsync(c => c.Date == yesterday) ||
-                await _db.AdminReconciliations.AnyAsync(r => r.Date == yesterday && r.Status == "submitted");
+            var yesterdayCommitted = await IsDateCommittedAsync(yesterday);
             return yesterdayCommitted ? today : yesterday;
         }
 
