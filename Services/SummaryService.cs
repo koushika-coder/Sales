@@ -178,8 +178,10 @@ namespace Sales.Services
                 || lottery != null
                 || paypoint != null;
 
-            var lastSafe    = safeDrop?.LastSafe      ?? 0m;
-            var closeAmount = safeDrop?.SafeDropAmount ?? 0m;
+            // null (not 0) when no SafeDrop record exists yet — lets the frontend tell
+            // "not entered" apart from a genuinely saved zero.
+            var lastSafe    = safeDrop?.LastSafe;
+            var closeAmount = safeDrop?.SafeDropAmount;
 
             return new SummaryResponse
             {
@@ -187,7 +189,7 @@ namespace Sales.Services
                 CreditCardEntries = creditCardEntries,
                 LastSafe = lastSafe,
                 SafeDropAmount = closeAmount,
-                Cash = lastSafe + closeAmount,
+                Cash = safeDrop != null ? lastSafe + closeAmount : null,
                 Cashback = deduction?.Cashback ?? 0m,
                 PaypointPayout = deduction?.PaypointPayout ?? 0m,
                 InstantLotteryPayout = deduction?.InstantLotteryPayout ?? 0m,
@@ -394,7 +396,7 @@ namespace Sales.Services
             // Sum of all user-entered values compared against the Z-report department total
             var userTotal = userManualCard
                           + userCard
-                          + summary.Cash
+                          + (summary.Cash ?? 0m)
                           + summary.Cashback
                           + summary.PaypointPayout
                           + summary.InstantLotteryPayout
@@ -412,7 +414,7 @@ namespace Sales.Services
             {
                 Cmp("Credit Card Banking", "Manual Card Amount",    userManualCard,                   0),
                 Cmp("Credit Card Banking", "Card Amount",            userCard,                         0),
-                Cmp("Cash Banking",        "Cash",                   summary.Cash,                     0),
+                Cmp("Cash Banking",        "Cash",                   summary.Cash ?? 0m,               0),
                 Cmp("Deductions",          "Cashback",               summary.Cashback,                 0),
                 Cmp("Deductions",          "Paypoint Payout",        summary.PaypointPayout,           0),
                 Cmp("Deductions",          "Instant Lottery Payout", summary.InstantLotteryPayout,     0),
@@ -614,7 +616,7 @@ namespace Sales.Services
                 var userCard        = summary.CreditCardEntries.Sum(e => e.CardAmount);
                 var calculatedTotal = userManualCard
                                     + userCard
-                                    + summary.Cash
+                                    + (summary.Cash ?? 0m)
                                     + summary.Cashback
                                     + summary.PaypointPayout
                                     + summary.InstantLotteryPayout
@@ -694,8 +696,8 @@ namespace Sales.Services
 
             row.ManualCardAmount         = summary.CreditCardEntries.Sum(e => e.ManualCardAmount);
             row.CardAmount               = summary.CreditCardEntries.Sum(e => e.CardAmount);
-            row.LastSafe                 = summary.LastSafe;
-            row.SafeDropAmount           = summary.SafeDropAmount;
+            row.LastSafe                 = summary.LastSafe ?? 0m;
+            row.SafeDropAmount           = summary.SafeDropAmount ?? 0m;
             row.Cashback                 = summary.Cashback;
             row.PaypointPayout           = summary.PaypointPayout;
             row.InstantLotteryPayout     = summary.InstantLotteryPayout;

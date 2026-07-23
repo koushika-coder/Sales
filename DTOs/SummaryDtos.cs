@@ -186,10 +186,11 @@ namespace Sales.DTOs
         // Credit Card Banking — full list for today
         public List<CreditCardSummaryEntry> CreditCardEntries { get; set; } = new();
 
-        // Cash Banking (SafeDrop)
-        public decimal LastSafe { get; set; }
-        public decimal SafeDropAmount { get; set; }
-        public decimal Cash { get; set; }   // read-only: LastSafe + SafeDropAmount
+        // Cash Banking (SafeDrop) — null means no SafeDrop record exists yet for this date
+        // (as opposed to a genuinely saved 0), so the frontend can show a blank field.
+        public decimal? LastSafe { get; set; }
+        public decimal? SafeDropAmount { get; set; }
+        public decimal? Cash { get; set; }   // read-only: LastSafe + SafeDropAmount
 
         // Deductions
         public decimal Cashback { get; set; }
