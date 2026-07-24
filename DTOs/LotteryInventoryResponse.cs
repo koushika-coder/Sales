@@ -14,8 +14,10 @@
 
         public int CloseNo { get; set; }
 
-        public int TotalSold { get; set; }
+        // null = no record saved yet for the active date (Id == 0); lets the frontend
+        // tell "not entered" apart from a genuinely saved zero.
+        public int? TotalSold { get; set; }
 
-        public decimal Sales { get; set; }
+        public decimal? Sales { get; set; }
     }
 }

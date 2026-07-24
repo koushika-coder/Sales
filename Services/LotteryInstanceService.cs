@@ -117,8 +117,8 @@ namespace Sales.Services
                         Price         = lottery.Price,
                         OpenNo        = openNo,
                         CloseNo       = 0,
-                        TotalSold     = 0,
-                        Sales         = 0,
+                        TotalSold     = null,
+                        Sales         = null,
                     });
                 }
             }
@@ -176,7 +176,8 @@ namespace Sales.Services
             // Use server-side active date so it always matches what GetTodayInventory returns
             var (activeStart, activeEnd) = await GetActiveDateRangeAsync(userId);
 
-            var totalSold = request.CloseNo - request.OpenNo;
+            // CloseNo < OpenNo can happen on a miscount/re-open — never persist a negative sale.
+            var totalSold = Math.Max(0, request.CloseNo - request.OpenNo);
             var sales     = totalSold * lottery.Price;
 
             var existingRecord = await _context.LotteryInventory
@@ -267,7 +268,7 @@ namespace Sales.Services
                 inventory.CloseNo = request.CloseNo;
 
                 inventory.TotalSold =
-                    request.CloseNo - request.OpenNo;
+                    Math.Max(0, request.CloseNo - request.OpenNo);
 
                 inventory.Sales =
                     inventory.TotalSold * request.Price;

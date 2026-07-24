@@ -104,8 +104,8 @@ namespace Sales.Services
                 .Where(li => li.InventoryDate >= start
                           && li.InventoryDate < end);
 
-            var instantLotteryTotalCount = await instantLotteryQuery.SumAsync(li => (int?)li.TotalSold) ?? 0;
-            var instantLotteryTotalSales = await instantLotteryQuery.SumAsync(li => (decimal?)li.Sales) ?? 0m;
+            var instantLotteryTotalCount = Math.Max(0, await instantLotteryQuery.SumAsync(li => (int?)li.TotalSold) ?? 0);
+            var instantLotteryTotalSales = Math.Max(0m, await instantLotteryQuery.SumAsync(li => (decimal?)li.Sales) ?? 0m);
 
             if (instantLotteryTotalCount == 0 && instantLotteryTotalSales == 0m)
             {
@@ -122,8 +122,8 @@ namespace Sales.Services
                     {
                         var fallback = _db.LotteryInventory
                             .Where(li => li.InventoryDate == latestInventoryTs.Value);
-                        instantLotteryTotalCount = await fallback.SumAsync(li => (int?)li.TotalSold) ?? 0;
-                        instantLotteryTotalSales = await fallback.SumAsync(li => (decimal?)li.Sales) ?? 0m;
+                        instantLotteryTotalCount = Math.Max(0, await fallback.SumAsync(li => (int?)li.TotalSold) ?? 0);
+                        instantLotteryTotalSales = Math.Max(0m, await fallback.SumAsync(li => (decimal?)li.Sales) ?? 0m);
                     }
                 }
             }
