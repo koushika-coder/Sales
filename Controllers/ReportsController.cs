@@ -34,22 +34,16 @@ namespace Sales.Controllers
         }
 
         // GET api/reports/download-pdf?startDate=2026-06-01&endDate=2026-06-30
-        // Downloads the filtered reconciliation reports as a PDF file.
+        // Downloads the filtered reconciliation reports: a single PDF when the range
+        // covers one date (or none), or a ZIP of one PDF per date otherwise.
         [HttpGet("download-pdf")]
         public async Task<IActionResult> DownloadPdf([FromQuery] DateOnly? startDate, [FromQuery] DateOnly? endDate)
         {
             if (startDate.HasValue && endDate.HasValue && endDate < startDate)
                 return BadRequest(new { message = "Start date must be on or before end date." });
 
-            var pdfBytes = await _service.GenerateReportsPdfAsync(startDate, endDate);
-
-            var from = startDate?.ToString("yyyy-MM-dd") ?? "start";
-            var to = endDate?.ToString("yyyy-MM-dd") ?? "end";
-            var fileName = startDate.HasValue || endDate.HasValue
-                ? $"reconciliation-reports-{from}-to-{to}.pdf"
-                : "reconciliation-reports.pdf";
-
-            return File(pdfBytes, "application/pdf", fileName);
+            var (fileName, bytes, contentType) = await _service.GenerateReportsDownloadAsync(startDate, endDate);
+            return File(bytes, contentType, fileName);
         }
 
         // GET api/reports/2026-06-12
